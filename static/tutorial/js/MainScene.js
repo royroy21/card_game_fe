@@ -10,68 +10,68 @@ export default class MainScene extends Phaser.Scene {
   preload() {
     this.load.image(
       'card',
-      '../../static/game/assets/card.png',
+      '../../static/tutorial/assets/card.png',
     );
     this.load.image(
       'armour',
-      '../../static/game/assets/armour.png',
+      '../../static/tutorial/assets/armour.png',
     );
     this.load.image(
       'card',
-      '../../static/game/assets/card.png',
+      '../../static/tutorial/assets/card.png',
     );
     this.load.image(
       'dead',
-      '../../static/game/assets/dead.png',
+      '../../static/tutorial/assets/dead.png',
     );
     this.load.image(
       'deathknight',
-      '../../static/game/assets/deathknight.png',
+      '../../static/tutorial/assets/deathknight.png',
     );
     this.load.image(
       'firedrake',
-      '../../static/game/assets/firedrake.png',
+      '../../static/tutorial/assets/firedrake.png',
     );
     this.load.image(
       'goldendragon',
-      '../../static/game/assets/goldendragon.png',
+      '../../static/tutorial/assets/goldendragon.png',
     );
     this.load.image(
       'healingpotion',
-      '../../static/game/assets/healingpotion.png',
+      '../../static/tutorial/assets/healingpotion.png',
     );
     this.load.image(
       'kobold',
-      '../../static/game/assets/kobold.png',
+      '../../static/tutorial/assets/kobold.png',
     );
     this.load.image(
       'ogre',
-      '../../static/game/assets/ogre.png',
+      '../../static/tutorial/assets/ogre.png',
     );
     this.load.image(
       'paladin',
-      '../../static/game/assets/paladin.png',
+      '../../static/tutorial/assets/paladin.png',
     );
     this.load.image(
       'playercard',
-      '../../static/game/assets/playercard.png',
+      '../../static/tutorial/assets/playercard.png',
     );
     this.load.image(
       'restartbutton',
-      '../../static/game/assets/restartbutton.png',
+      '../../static/tutorial/assets/restartbutton.png',
     );
     this.load.image(
       'shield',
-      '../../static/game/assets/shield.png',
+      '../../static/tutorial/assets/shield.png',
     );
     this.load.image(
       'troll',
-      '../../static/game/assets/troll.png',
+      '../../static/tutorial/assets/troll.png',
     );
     this.load.bitmapFont(
       'pressstart',
-      '../../static/game/assets/pressstart.png',
-      '../../static/game/assets/pressstart.fnt',
+      '../../static/tutorial/assets/pressstart.png',
+      '../../static/tutorial/assets/pressstart.fnt',
     )
   }
 

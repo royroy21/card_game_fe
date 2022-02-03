@@ -5,6 +5,6 @@ app = Flask(__name__)
 app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/')
 
 
-@app.route("/")
-def game():
-    return render_template("game.html")
+@app.route("/tutorial")
+def tutorial():
+    return render_template("tutorial.html")
