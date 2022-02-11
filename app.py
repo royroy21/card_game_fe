@@ -8,3 +8,7 @@ app.wsgi_app = WhiteNoise(app.wsgi_app, root='static/')
 @app.route("/tutorial")
 def tutorial():
     return render_template("tutorial.html")
+
+@app.route("/game")
+def game():
+    return render_template("game.html")
