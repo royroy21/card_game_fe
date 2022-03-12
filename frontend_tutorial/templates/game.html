@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Card Game</title>
+</head>
+<style>
+    body {
+        all: unset;
+        background-color: #707070;
+    }
+    #phaserGame {
+        margin: 0;
+        height: 100%;
+        width: 100%;
+    }
+</style>
+<body>
+    <div id="phaserGame" oncontextmenu="return false;"></div>
+    <script type="module" src="{{ url_for('static', filename='bundle.js') }}"></script>
+</body>
+</html>

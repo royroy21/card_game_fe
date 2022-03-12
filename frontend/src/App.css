@@ -1,0 +1,45 @@
+body {
+  all: unset;
+  background-color: #707070;
+  font-family: Arial, sans-serif;
+}
+
+a {
+  color: hotpink;
+  display: block;
+  text-decoration: none;
+  width: 100%;
+}
+
+canvas {
+  display : block;
+  margin : auto;
+}
+
+ul {
+  list-style: none;
+  padding: 0;
+}
+
+.btn {
+  background-color: #707070;
+  color: hotpink;
+  cursor: pointer;
+  margin-bottom: 3px;
+}
+
+.btn:hover {
+  background-color: pink;
+  cursor: pointer;
+}
+
+.light_color {
+  background-color: #707070;
+}
+
+.page {
+  background-color: #575757;
+  margin: 40px 0 0 40%;
+  padding: 5px;
+  width: 20%;
+}

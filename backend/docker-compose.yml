@@ -1,0 +1,41 @@
+version: "3"
+
+services:
+  cache:
+    image: redis:6.2-alpine
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - cache-data:/data
+  database:
+    image: geographica/postgis:unbiased_uakari
+    ports:
+      - "9432:5432"
+    volumes:
+      - database-data:/data
+    environment:
+      - POSTGRES_PASSWD=postgres
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python3 manage.py runserver 0.0.0.0:8000
+    environment:
+      - DEBUG=True
+      - DJANGO_SETTINGS_MODULE=settings.local
+      - SECRET_KEY=fa7cf8854439b7b16ebc98444798037701fb8c4a2f01f42f
+    restart: unless-stopped
+    volumes:
+      - .:/code
+    ports:
+      - "8000:8000"
+    depends_on:
+      - cache
+      - database
+    stdin_open: true
+    tty: true
+
+volumes:
+  cache-data:
+  database-data:

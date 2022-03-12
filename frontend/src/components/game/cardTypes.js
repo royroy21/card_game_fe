@@ -1,0 +1,60 @@
+const cardTypes = [
+  {
+    name: "Young Kobold",
+    image: "kobold",
+    type: "minion",
+    defence: "1",
+    attack: "1",
+    cost: "1",
+  },
+  {
+    name: "Kobold",
+    image: "kobold",
+    type: "minion",
+    defence: "3",
+    attack: "2",
+    cost: "2",
+  },
+  {
+    name: "Troll",
+    image: "troll",
+    type: "minion",
+    defence: "4",
+    attack: "3",
+    cost: "4",
+  },
+  {
+    name: "Ogre",
+    image: "ogre",
+    type: "minion",
+    defence: "6",
+    attack: "5",
+    cost: "5",
+  },
+  {
+    name: "Death Knight",
+    image: "deathknight",
+    type: "minion",
+    defence: "5",
+    attack: "8",
+    cost: "6",
+  },
+  {
+    name: "Fire Drake",
+    image: "firedrake",
+    type: "minion",
+    defence: "6",
+    attack: "7",
+    cost: "7",
+  },
+  {
+    name: "Golden Dragon",
+    image: "goldendragon",
+    type: "minion",
+    defence: "10",
+    attack: "10",
+    cost: "10",
+  },
+]
+
+export default cardTypes;
