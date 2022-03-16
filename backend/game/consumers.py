@@ -15,12 +15,19 @@ GAME_TIME_TO_LIVE = 3600  # one hour
 # {
 # 	"type": "connecting",
 # 	"message": {
-#       "origin",
-#       "text",
+#       "origin": "",
+#       "text": "",
+#       "data": {} or [],
 #       "game": {
 #           "gameID": "",
-#           "player1": "",
-#           "player2": "",
+#           "player1": {
+#               "name": "",
+#               "cards": [],
+#            },
+#           "player2": {
+#               "name": "",
+#               "cards": [],
+#           },
 #       },
 # 	},
 # }
@@ -42,8 +49,8 @@ class GameConsumer(AsyncWebsocketConsumer):
         if not cache.get(self.game_name):
             cache.set(self.game_name, {
                 "gameID": self.game_name,
-                "player1": "",
-                "player2": "",
+                "player1": None,
+                "player2": None,
             }, GAME_TIME_TO_LIVE)
 
         # Join game group
@@ -75,18 +82,25 @@ class GameConsumer(AsyncWebsocketConsumer):
     async def connect_player(self, event: Dict):
         message = event["message"]
         player_id = message["origin"]
+        cards = message["data"]["cards"]
         game = cache.get(self.game_name)
 
         # Check player 1
         if not game["player1"]:
-            game["player1"] = player_id
+            game["player1"] = {
+                "name": player_id,
+                "cards": cards,
+            }
             text = self.MESSAGE_CONNECTED
         elif game["player1"] == player_id:
             text = self.MESSAGE_RECONNECTED
 
         # Check player 2
         elif not game["player2"]:
-            game["player2"] = player_id
+            game["player2"] = {
+                "name": player_id,
+                "cards": cards,
+            }
             text = self.MESSAGE_CONNECTED
             # Remove game from available games
             # as game now has required players

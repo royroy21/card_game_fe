@@ -33,6 +33,8 @@ const Chat = (props) => {
     }
   }
 
+  console.log("props.messages", props.messages);
+
   return (
     <div id={"chatContainer"} style={{maxHeight: "100%"}}>
       <form

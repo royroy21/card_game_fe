@@ -17,11 +17,13 @@ class MainScene extends Phaser.Scene {
     this.cardScale = 0.7;
     this.numberOfCards = 30;
     this.numberOfZones = 6;
-    this.playerDeck = [];
-    this.playerHand = [];
+    this.playerDeck = [];  // remove this. Gets from this.game
+    this.playerHand = [];  // remove this. Gets from this.game
     this.containers = {};
     this.tintColour = 0x44ff44;
     this.hasCardFocus = false;
+    this.player = null;  // stores if player1 or player2
+    this.game = null;
   }
 
   preload() {
@@ -36,12 +38,18 @@ class MainScene extends Phaser.Scene {
       `${BASE_BACKEND_GAME_WEB_SOCKET_URL}${this.getGameID()}/`
     );
 
+    const cards = this.createCardDeck(width / 6 * 5, height / 6 * 5);
+    const playerID = this.getPlayerID();
+
     // Sends message on connection
     const connectingMessage = {
       type: MESSAGE_TYPE_CONNECT_PLAYER,
       message: {
-        origin: this.getPlayerID(),
+        origin: playerID,
         text: null,
+        data: {
+          cards,
+        },
         game: {
           gameID: this.getGameID(),
           player1: null,
@@ -67,6 +75,10 @@ class MainScene extends Phaser.Scene {
     // Listen for messages
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
+      this.game = message.game;
+      if (this.game !== null) {
+        this.player = this.game.player1.name === playerID ? "player1" : "player2";
+      }
       eventsCenter.emit("game", message);
       // TODO game full logic still not fully working ;/
       if (message.error === ERROR_GAME_IS_FULL) {
@@ -77,7 +89,7 @@ class MainScene extends Phaser.Scene {
 
     this.createEnemyDropZones(width, height);
     this.createPlayerDropZones(width, height);
-    this.createCardDeck(width, height);
+    this.createPlayerCardDeck(cards);
     this.createPlayerHandDropZone(width, height);
 
     this.input.on('dragstart', (pointer, gameObject) => {
@@ -217,24 +229,13 @@ class MainScene extends Phaser.Scene {
     gameObject.disableInteractive();
   }
 
-  createCardDeck(width, height) {
-    let x = width / 6 * 5;
-    let y = height / 6 * 5;
-
+  createPlayerCardDeck(cards) {
     for (let index = 0; index < this.numberOfCards; index++) {
-      const cardType = cardTypes[Math.floor(Math.random() * cardTypes.length)];
       let card = new CardBase({
         scene: this,
-        name: cardType.name,
-        x: x,
-        y: y,
         card: "card",
-        image: cardType.image,
-        type: cardType.type,
-        attack: cardType.attack,
-        defence: cardType.defence,
-        cost: cardType.cost,
-        depth: 0
+        depth: 0,
+        ...cards[index],
       });
       card.setSize(card.spriteCard.width, card.spriteCard.height);
       card.setScale(this.cardScale);
@@ -242,11 +243,32 @@ class MainScene extends Phaser.Scene {
       if (index === this.numberOfCards - 1) {
         this.setToDraggable(card);
       }
-      x += getRandomNumber(-3, 3, 1);
-      y += getRandomNumber(-3, 3, 1);
-
       this.playerDeck.push(card);
     }
+  }
+
+  createCardDeck(x, y) {
+    // For the purposes of this demo cards
+    // are randomly created from card types
+    const cards = [];
+    for (let index = 0; index < this.numberOfCards; index++) {
+      const cardType = cardTypes[Math.floor(Math.random() * cardTypes.length)];
+      // To give the impression visually of a messy desk
+      x += getRandomNumber(-3, 3, 1);
+      y += getRandomNumber(-3, 3, 1);
+      let card = {
+        name: cardType.name,
+        x: x,
+        y: y,
+        image: cardType.image,
+        type: cardType.type,
+        attack: cardType.attack,
+        defence: cardType.defence,
+        cost: cardType.cost,
+      };
+      cards.push(card);
+    }
+    return cards;
   }
 
   createPlayerHandDropZone(width, height) {
