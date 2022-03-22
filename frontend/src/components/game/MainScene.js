@@ -1,15 +1,26 @@
 import Phaser from "phaser";
-import CardBase from "./CardBase";
+import Card from "./Card";
 import cardTypes from "./cardTypes";
 import getRandomNumber from "../utils/getRandomNumber";
 import removeFromList from "../utils/removeFromList";
 import {BASE_BACKEND_GAME_WEB_SOCKET_URL} from "../../settings";
 import eventsCenter from "./EventsCenter";
 import loadAssets from "./assetLoader";
+import HiddenCard from "./HiddenCard";
 
+// Connecting messages
 const MESSAGE_TYPE_CONNECT_PLAYER = "connect_player";
-const MESSAGE_TYPE_DISCONNECT_PLAYER = "disconnect_player";
-const ERROR_GAME_IS_FULL = "game_full";
+const MESSAGE_TYPE_PLAYER_CONNECTED = "player_connected";
+// const MESSAGE_TYPE_DISCONNECT_PLAYER = "disconnect_player";
+// const ERROR_GAME_IS_FULL = "game_full";
+
+// Game messages
+const MESSAGE_CHAT = "chat";
+const MESSAGE_OTHER_PLAYER_UPDATED_DECK = "other_player_updated_deck";
+const MESSAGE_UPDATE_DECK = "update_deck";
+const MESSAGE_UPDATE_HAND = "update_hand";
+const MESSAGE_MOVE_CARD = "move_card";
+const MESSAGE_OTHER_PLAYER_CARD_MOVED = "other_player_card_moved";
 
 class MainScene extends Phaser.Scene {
   constructor( ) {
@@ -17,13 +28,19 @@ class MainScene extends Phaser.Scene {
     this.cardScale = 0.7;
     this.numberOfCards = 30;
     this.numberOfZones = 6;
-    this.playerDeck = [];  // remove this. Gets from this.game
-    this.playerHand = [];  // remove this. Gets from this.game
+    this.playerDeck = [];
+    this.playerHand = [];
+    this.otherPlayerCardYOffSet = 600;
+    this.otherPlayerDeck = [];
+    this.otherPlayerHand = [];
     this.containers = {};
     this.tintColour = 0x44ff44;
     this.hasCardFocus = false;
+
     this.player = null;  // stores if player1 or player2
+    this.playerID = null;
     this.game = null;
+    this.isConnected = false;
   }
 
   preload() {
@@ -31,24 +48,34 @@ class MainScene extends Phaser.Scene {
     this.canvas = this.sys.game.canvas;
   }
 
+  getOtherPlayer() {
+    return this.player === "player2" ? "player1" : "player2"
+  }
+
   create() {
     let { width, height } = this.canvas;
+
+    console.log("width: ", width);
+    console.log("height: ", height);
 
     this.socket = new WebSocket(
       `${BASE_BACKEND_GAME_WEB_SOCKET_URL}${this.getGameID()}/`
     );
 
-    const cards = this.createCardDeck(width / 6 * 5, height / 6 * 5);
-    const playerID = this.getPlayerID();
+    this.playerDeck = this.createPlayerCardDeck(width, height);
+    this.playerID = this.getPlayerID();
 
     // Sends message on connection
     const connectingMessage = {
       type: MESSAGE_TYPE_CONNECT_PLAYER,
       message: {
-        origin: playerID,
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
         text: null,
         data: {
-          cards,
+          cards: this.playerDeck.map(card => card.initialData)
         },
         game: {
           gameID: this.getGameID(),
@@ -63,7 +90,7 @@ class MainScene extends Phaser.Scene {
 
     eventsCenter.addListener("chat", (message) => {
       this.socket.send(JSON.stringify({
-        type: "player_message",
+        type: MESSAGE_CHAT,
         message: message,
       }));
     });
@@ -75,21 +102,67 @@ class MainScene extends Phaser.Scene {
     // Listen for messages
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
-      this.game = message.game;
-      if (this.game !== null) {
-        this.player = this.game.player1.name === playerID ? "player1" : "player2";
+
+      console.log("message: ", message);
+
+      switch (message.type) {
+        case MESSAGE_TYPE_PLAYER_CONNECTED:
+          // Add updated game object
+          this.game = message.game;
+          // Update if this is player1 or player 2
+          this.player = this.game.player1.name === this.playerID ? "player1" : "player2";
+          this.createOtherPlayerDeck(message);
+          eventsCenter.emit("game", message);
+          break;
+        case MESSAGE_CHAT:
+          eventsCenter.emit("game", message);
+          break;
+        case MESSAGE_OTHER_PLAYER_UPDATED_DECK:
+          if (!message.game[this.getOtherPlayer()]) {
+            break;
+          }
+          console.log(
+            "hits: other_player_updated_deck",
+            message.game[this.getOtherPlayer()].deck.length,
+          );
+          const created = this.createOtherPlayerDeck(message);
+          console.log("this.otherPlayerDeck .. ", this.otherPlayerDeck);
+          if (created) {
+            break;
+          }
+          break;
+          // const otherPlayerUpdatedCardIds = (
+          //   message.game[this.getOtherPlayer()].deck.map(card => card.id)
+          // )
+          // this.otherPlayerDeck = this.otherPlayerDeck.filter(
+          //   card => otherPlayerUpdatedCardIds.includes(card.id)
+          // )
+          // console.log("this.otherPlayerDeck: ", this.otherPlayerDeck.length);
+        case MESSAGE_OTHER_PLAYER_CARD_MOVED:
+          console.log("hits MESSAGE_OTHER_PLAYER_CARD_MOVED .. ");
+          console.log("this.otherPlayerDeck .. ", this.otherPlayerDeck);
+          const updateDatedCardData = message["data"]["card"]
+          this.otherPlayerDeck = this.otherPlayerDeck.map(card => {
+            console.log(updateDatedCardData, card)
+            if (card.id === updateDatedCardData.id) {
+              card.x = updateDatedCardData.x;
+              card.y = updateDatedCardData.y;
+            }
+            return card;
+          })
+          break;
       }
-      eventsCenter.emit("game", message);
+
       // TODO game full logic still not fully working ;/
-      if (message.error === ERROR_GAME_IS_FULL) {
-        localStorage.clear();
-        this.sys.game.destroy(true);
-      }
+      // TODO this should go into this.socket.addEventListener('error',
+      // if (message.error === ERROR_GAME_IS_FULL) {
+      //   localStorage.clear();
+      //   this.sys.game.destroy(true);
+      // }
     });
 
     this.createEnemyDropZones(width, height);
     this.createPlayerDropZones(width, height);
-    this.createPlayerCardDeck(cards);
     this.createPlayerHandDropZone(width, height);
 
     this.input.on('dragstart', (pointer, gameObject) => {
@@ -101,10 +174,13 @@ class MainScene extends Phaser.Scene {
     }, this);
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
+      const lastXPosition = gameObject.x;
+      const lastYPosition = gameObject.y;
       gameObject.x = dragX;
       gameObject.y = dragY;
       gameObject.rotation = 0;
       gameObject.setScale(this.cardScale);
+      this.movePlayerCard(height, gameObject, dragX, dragY, lastXPosition, lastYPosition);
     });
 
     this.input.on('dragenter', (pointer, gameObject, dropZone) => {
@@ -224,51 +300,118 @@ class MainScene extends Phaser.Scene {
     });
   }
 
+  createOtherPlayerDeck(message) {
+    if (this.otherPlayerDeck.length === 0 && message.game[this.getOtherPlayer()] !== null) {
+      this.otherPlayerDeck = (
+        message.game[this.getOtherPlayer()].deck.map(card => this.createCard({
+          scene: this, ...card,
+        }, true))
+      );
+      return true;
+    } else {
+      return false;
+    }
+  }
+
+  updatePlayerCards(cards, type) {
+    // type is MESSAGE_UPDATE_DECK or MESSAGE_UPDATE_HAND
+    const data = {
+      type,
+      message: {
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
+        text: null,
+        data: {
+          cards: cards.map(card => card.initialData)
+        },
+        game: this.game,
+      }
+    };
+    this.socket.send(JSON.stringify(data));
+  }
+
+  movePlayerCard(height, card, x, y, lastXPosition, lastYPosition) {
+    // Check card has moved enough to warrant sending a request.
+    if (Math.round(x) !== Math.round(lastXPosition)
+        && Math.round(y) !== Math.round(lastYPosition)) {
+      return;
+    }
+
+    const data = {
+      type: MESSAGE_MOVE_CARD,
+      message: {
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
+        text: null,
+        data: {
+          card: {
+            ...card.initialData,
+            x,
+            // y: card.y y - this.otherPlayerCardYOffSet,
+            y: height - y,
+          },
+        },
+        game: this.game,
+      }
+    };
+    this.socket.send(JSON.stringify(data));
+  }
+
   setToNotDraggable(gameObject) {
     gameObject.spriteCard.clearTint();
     gameObject.disableInteractive();
   }
 
-  createPlayerCardDeck(cards) {
-    for (let index = 0; index < this.numberOfCards; index++) {
-      let card = new CardBase({
-        scene: this,
-        card: "card",
-        depth: 0,
-        ...cards[index],
-      });
-      card.setSize(card.spriteCard.width, card.spriteCard.height);
-      card.setScale(this.cardScale);
-
-      if (index === this.numberOfCards - 1) {
-        this.setToDraggable(card);
-      }
-      this.playerDeck.push(card);
-    }
-  }
-
-  createCardDeck(x, y) {
-    // For the purposes of this demo cards
-    // are randomly created from card types
+  createPlayerCardDeck(width, height) {
+    const x = width / 6 * 5
+    const y = height / 6 * 5
     const cards = [];
+
     for (let index = 0; index < this.numberOfCards; index++) {
       const cardType = cardTypes[Math.floor(Math.random() * cardTypes.length)];
-      // To give the impression visually of a messy desk
-      x += getRandomNumber(-3, 3, 1);
-      y += getRandomNumber(-3, 3, 1);
-      let card = {
+      let card = this.createCard({
+        scene: this,
+        id: getRandomNumber(100000, 9999999),
         name: cardType.name,
-        x: x,
-        y: y,
+        x: x + getRandomNumber(-3, 3, 1),
+        y: y + getRandomNumber(-3, 3, 1),
+        card: "card",
         image: cardType.image,
         type: cardType.type,
         attack: cardType.attack,
         defence: cardType.defence,
         cost: cardType.cost,
-      };
+        depth: 0,
+      })
+
+      if (index === this.numberOfCards - 1) {
+        this.setToDraggable(card);
+      }
       cards.push(card);
     }
     return cards;
+  }
+
+  createCard(data, otherPlayerCards=false) {
+    // If this is other players card we should
+    // adjust the Y value for this player's screen.
+    if (otherPlayerCards) {
+      const card = new HiddenCard({
+        ...data,
+        y: data.y - this.otherPlayerCardYOffSet,
+      });
+      card.setSize(card.spriteCard.width, card.spriteCard.height);
+      card.setScale(this.cardScale);
+      return card;
+    }
+    const card = new Card(data);
+    card.setSize(card.spriteCard.width, card.spriteCard.height);
+    card.setScale(this.cardScale);
+    return card;
   }
 
   createPlayerHandDropZone(width, height) {
@@ -321,6 +464,7 @@ class MainScene extends Phaser.Scene {
     }
     this.resetPlayerHandPositions();
     dropZone.list[0].clearTint();
+    this.updatePlayerCards(this.playerDeck, MESSAGE_UPDATE_DECK);
   }
 
   dropOnPlayerCard(gameObject, dropZone) {
@@ -334,6 +478,7 @@ class MainScene extends Phaser.Scene {
     }
     this.setToNotDraggable(gameObject);
     this.containers[dropZone.name].disableInteractive()
+    this.updatePlayerCards(this.playerDeck);
   }
 
   update(time, delta) {

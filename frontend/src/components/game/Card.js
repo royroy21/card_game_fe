@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 
-class CardBase extends Phaser.GameObjects.Container {
+class Card extends Phaser.GameObjects.Container {
   constructor(data) {
     const {
       scene,
+      id,
       name,
       x,
       y,
@@ -38,6 +39,20 @@ class CardBase extends Phaser.GameObjects.Container {
       textCost,
     ];
     super(scene, x, y, containerChildren);
+    this.initialData = {
+      id,
+      name,
+      x,
+      y,
+      card,
+      image,
+      type,
+      attack,
+      defence,
+      cost,
+      depth,
+    };
+    this.id = id;
     this.spriteCard = spriteCard;
     this.textName = textName;
     this.cardName = name;
@@ -112,4 +127,4 @@ class CardBase extends Phaser.GameObjects.Container {
   // }
 }
 
-export default CardBase;
+export default Card;

@@ -37,10 +37,10 @@ usage:
 	@echo "update_requirements.............Update requirements file after adding a dependency"
 
 attach:
-	@docker attach card_game_fe_backend_1
+	@docker attach backend_backend_1
 
 black:
-	@docker-compose run --rm backend black backend ${ARGS}
+	@docker-compose run --rm backend black . ${ARGS}
 
 black_check:
 	$(MAKE) black ARGS="--check"
@@ -58,13 +58,13 @@ help:
 	$(MAKE) usage
 
 isort:
-	@docker-compose run --rm backend isort backend ${ARGS}
+	@docker-compose run --rm backend isort . ${ARGS}
 
 isort_check:
 	$(MAKE) isort ARGS="--check"
 
 lint:
-	@docker-compose run --rm backend flake8 backend ${ARGS}
+	@docker-compose run --rm backend flake8 . ${ARGS}
 
 manage:
 	@docker-compose run --rm ${OPTIONS} backend python3 ${PYTHON_ARGS} manage.py ${ARGS}
@@ -76,7 +76,7 @@ migrations:
 	$(MAKE) manage ARGS="makemigrations ${ARGS}"
 
 mypy:
-	@docker-compose run --rm backend mypy --config-file mypy.ini backend ${ARGS}
+	@docker-compose run --rm backend mypy --config-file mypy.ini . ${ARGS}
 
 shell:
 	$(MAKE) manage ARGS="shell_plus --ipython ${ARGS}"

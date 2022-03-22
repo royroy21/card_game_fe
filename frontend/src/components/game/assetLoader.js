@@ -7,6 +7,10 @@ const loadAssets = (scene) => {
       'assets/card2.png',
     );
     scene.load.image(
+      'cardback',
+      'assets/cardback.png',
+    );
+    scene.load.image(
       'armour',
       'assets/armour.png',
     );
