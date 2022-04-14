@@ -32,6 +32,10 @@ GAME_TIME_TO_LIVE = 3600  # one hour
 #       "origin": {
 #           "name": "",  # playerID / name
 #           "player" "",  # player1 or player2
+#           "canvas": {
+#               width: this.width,
+#               height: this.height,
+#           },
 #       },
 #       "text": "",
 #       "data": {} or [],

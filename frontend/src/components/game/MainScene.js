@@ -7,6 +7,7 @@ import {BASE_BACKEND_GAME_WEB_SOCKET_URL} from "../../settings";
 import eventsCenter from "./EventsCenter";
 import loadAssets from "./assetLoader";
 import HiddenCard from "./HiddenCard";
+import {convertPercentToPixels, convertPixelsToPercent} from "../utils/percent";
 
 // Connecting messages
 const MESSAGE_TYPE_CONNECT_PLAYER = "connect_player";
@@ -25,7 +26,7 @@ const MESSAGE_OTHER_PLAYER_CARD_MOVED = "other_player_card_moved";
 class MainScene extends Phaser.Scene {
   constructor( ) {
     super('MainScene');
-    this.cardScale = 0.7;
+    this.cardScale = 0.5;  // This is a base value and will be increased for larger screens.
     this.numberOfCards = 30;
     this.numberOfZones = 6;
     this.playerDeck = [];
@@ -41,6 +42,9 @@ class MainScene extends Phaser.Scene {
     this.playerID = null;
     this.game = null;
     this.isConnected = false;
+
+    this.frameCount = 0;
+    this.informOtherPlayerOfCardMoveCount = null;
   }
 
   preload() {
@@ -53,19 +57,22 @@ class MainScene extends Phaser.Scene {
   }
 
   create() {
-    let { width, height } = this.canvas;
+    const { width, height } = this.canvas;
+    this.width = width;
+    this.height = height;
 
-    console.log("width: ", width);
-    console.log("height: ", height);
+    // Scale card size for larger screens
+    const scaleMultiplier = (this.width - 1000) / 300;
+    this.cardScale += parseFloat(scaleMultiplier.toFixed(0)) / 10;
 
     this.socket = new WebSocket(
       `${BASE_BACKEND_GAME_WEB_SOCKET_URL}${this.getGameID()}/`
     );
 
-    this.playerDeck = this.createPlayerCardDeck(width, height);
+    this.playerDeck = this.createPlayerCardDeck();
     this.playerID = this.getPlayerID();
 
-    // Sends message on connection
+    // Sends message on connection.
     const connectingMessage = {
       type: MESSAGE_TYPE_CONNECT_PLAYER,
       message: {
@@ -75,7 +82,13 @@ class MainScene extends Phaser.Scene {
         },
         text: null,
         data: {
-          cards: this.playerDeck.map(card => card.initialData)
+          cards: this.playerDeck.map(card => {
+            return {
+             ...card.initialData,
+             x: convertPixelsToPercent(this.width, card.x),
+             y: convertPixelsToPercent(this.height, card.y),
+            }
+          })
         },
         game: {
           gameID: this.getGameID(),
@@ -102,16 +115,13 @@ class MainScene extends Phaser.Scene {
     // Listen for messages
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
-
-      console.log("message: ", message);
-
       switch (message.type) {
         case MESSAGE_TYPE_PLAYER_CONNECTED:
           // Add updated game object
           this.game = message.game;
           // Update if this is player1 or player 2
           this.player = this.game.player1.name === this.playerID ? "player1" : "player2";
-          this.createOtherPlayerDeck(message);
+          this.createEnemyPlayerDeck(message);
           eventsCenter.emit("game", message);
           break;
         case MESSAGE_CHAT:
@@ -121,12 +131,7 @@ class MainScene extends Phaser.Scene {
           if (!message.game[this.getOtherPlayer()]) {
             break;
           }
-          console.log(
-            "hits: other_player_updated_deck",
-            message.game[this.getOtherPlayer()].deck.length,
-          );
-          const created = this.createOtherPlayerDeck(message);
-          console.log("this.otherPlayerDeck .. ", this.otherPlayerDeck);
+          const created = this.createEnemyPlayerDeck(message);
           if (created) {
             break;
           }
@@ -137,16 +142,13 @@ class MainScene extends Phaser.Scene {
           // this.otherPlayerDeck = this.otherPlayerDeck.filter(
           //   card => otherPlayerUpdatedCardIds.includes(card.id)
           // )
-          // console.log("this.otherPlayerDeck: ", this.otherPlayerDeck.length);
         case MESSAGE_OTHER_PLAYER_CARD_MOVED:
-          console.log("hits MESSAGE_OTHER_PLAYER_CARD_MOVED .. ");
-          console.log("this.otherPlayerDeck .. ", this.otherPlayerDeck);
           const updateDatedCardData = message["data"]["card"]
           this.otherPlayerDeck = this.otherPlayerDeck.map(card => {
-            console.log(updateDatedCardData, card)
             if (card.id === updateDatedCardData.id) {
-              card.x = updateDatedCardData.x;
-              card.y = updateDatedCardData.y;
+              card.x = this.width - convertPercentToPixels(this.width, updateDatedCardData.x);
+              card.y = this.height - convertPercentToPixels(this.height, updateDatedCardData.y);
+              this.children.bringToTop(card);
             }
             return card;
           })
@@ -161,9 +163,9 @@ class MainScene extends Phaser.Scene {
       // }
     });
 
-    this.createEnemyDropZones(width, height);
-    this.createPlayerDropZones(width, height);
-    this.createPlayerHandDropZone(width, height);
+    this.createEnemyDropZones();
+    this.createPlayerDropZones();
+    this.createPlayerHandDropZone();
 
     this.input.on('dragstart', (pointer, gameObject) => {
       if (this.hasCardFocus) {
@@ -174,13 +176,11 @@ class MainScene extends Phaser.Scene {
     }, this);
 
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
-      const lastXPosition = gameObject.x;
-      const lastYPosition = gameObject.y;
       gameObject.x = dragX;
       gameObject.y = dragY;
       gameObject.rotation = 0;
-      gameObject.setScale(this.cardScale);
-      this.movePlayerCard(height, gameObject, dragX, dragY, lastXPosition, lastYPosition);
+      // gameObject.setScale(this.cardScale);
+      this.informOtherPlayerOfCardMove(gameObject);
     });
 
     this.input.on('dragenter', (pointer, gameObject, dropZone) => {
@@ -209,6 +209,7 @@ class MainScene extends Phaser.Scene {
       if (!dropped) {
         gameObject.x = gameObject.input.dragStartX;
         gameObject.y = gameObject.input.dragStartY;
+        this.informOtherPlayerOfCardMove(gameObject, true);
       }
       this.hasCardFocus = false;
     });
@@ -239,16 +240,16 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  createPlayerDropZones(width, height) {
-    const sectionSize = width / this.numberOfZones;
+  createPlayerDropZones() {
+    const sectionSize = this.width / this.numberOfZones;
     const centerOfSection = sectionSize / 2;
 
     for (let index = 0; index < this.numberOfZones; index++) {
       let dropzone = this.add.image(0, 0, "dropzone");
-      dropzone.setScale(this.cardScale - 1);
+      dropzone.setScale(this.cardScale - 0.25);
       let dropZoneContainer = this.add.container(
         sectionSize * index + centerOfSection,
-        height / 2 + dropzone.height / 5,
+        this.height / 2 + convertPercentToPixels(this.height, 12),
         [ dropzone ]
       );
       dropZoneContainer.setSize(dropzone.width, dropzone.height);
@@ -259,17 +260,17 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  createEnemyDropZones(width, height) {
+  createEnemyDropZones() {
     // When first created enemy drop zones are not active.
-    const sectionSize = width / this.numberOfZones;
+    const sectionSize = this.width / this.numberOfZones;
     const centerOfSection = sectionSize / 2;
 
     for (let index = 0; index < this.numberOfZones; index++) {
       let dropzone = this.add.image(0, 0, "dropzone");
-      dropzone.setScale(this.cardScale - 1);
+      dropzone.setScale(this.cardScale - 0.25);
       let dropZoneContainer = this.add.container(
         sectionSize * index + centerOfSection,
-        height / 2 - 150,
+        this.height / 2 - convertPercentToPixels(this.height, 12),
         [ dropzone ]
       );
       dropZoneContainer.setSize(dropzone.width, dropzone.height);
@@ -300,12 +301,12 @@ class MainScene extends Phaser.Scene {
     });
   }
 
-  createOtherPlayerDeck(message) {
+  createEnemyPlayerDeck(message) {
     if (this.otherPlayerDeck.length === 0 && message.game[this.getOtherPlayer()] !== null) {
       this.otherPlayerDeck = (
-        message.game[this.getOtherPlayer()].deck.map(card => this.createCard({
+        message.game[this.getOtherPlayer()].deck.map(card => this.createEnemyCard({
           scene: this, ...card,
-        }, true))
+        }))
       );
       return true;
     } else {
@@ -332,11 +333,21 @@ class MainScene extends Phaser.Scene {
     this.socket.send(JSON.stringify(data));
   }
 
-  movePlayerCard(height, card, x, y, lastXPosition, lastYPosition) {
-    // Check card has moved enough to warrant sending a request.
-    if (Math.round(x) !== Math.round(lastXPosition)
-        && Math.round(y) !== Math.round(lastYPosition)) {
-      return;
+  cardMoveUpdateRate = 60;
+
+  informOtherPlayerOfCardMove(card, forceUpdate=false) {
+    // Only perform this action every x frames
+    if (!forceUpdate) {
+      if (!this.informOtherPlayerOfCardMoveCount) {
+        this.informOtherPlayerOfCardMoveCount = this.frameCount;
+      }
+      if (
+        this.frameCount
+        - this.informOtherPlayerOfCardMoveCount
+        > this.cardMoveUpdateRate
+      ) {
+        return
+      }
     }
 
     const data = {
@@ -350,15 +361,15 @@ class MainScene extends Phaser.Scene {
         data: {
           card: {
             ...card.initialData,
-            x,
-            // y: card.y y - this.otherPlayerCardYOffSet,
-            y: height - y,
+            x: convertPixelsToPercent(this.width, card.x),
+            y: convertPixelsToPercent(this.height, card.y),
           },
         },
         game: this.game,
       }
     };
     this.socket.send(JSON.stringify(data));
+    this.informOtherPlayerOfCardMoveCount = null;
   }
 
   setToNotDraggable(gameObject) {
@@ -366,9 +377,9 @@ class MainScene extends Phaser.Scene {
     gameObject.disableInteractive();
   }
 
-  createPlayerCardDeck(width, height) {
-    const x = width / 6 * 5
-    const y = height / 6 * 5
+  createPlayerCardDeck() {
+    const x = this.width / 6 * 5
+    const y = this.height / 6 * 5
     const cards = [];
 
     for (let index = 0; index < this.numberOfCards; index++) {
@@ -396,30 +407,30 @@ class MainScene extends Phaser.Scene {
     return cards;
   }
 
-  createCard(data, otherPlayerCards=false) {
-    // If this is other players card we should
-    // adjust the Y value for this player's screen.
-    if (otherPlayerCards) {
-      const card = new HiddenCard({
-        ...data,
-        y: data.y - this.otherPlayerCardYOffSet,
-      });
-      card.setSize(card.spriteCard.width, card.spriteCard.height);
-      card.setScale(this.cardScale);
-      return card;
-    }
+  createCard(data) {
     const card = new Card(data);
     card.setSize(card.spriteCard.width, card.spriteCard.height);
     card.setScale(this.cardScale);
     return card;
   }
 
-  createPlayerHandDropZone(width, height) {
+  createEnemyCard(data) {
+    const card = new HiddenCard({
+      ...data,
+      x: this.width - convertPercentToPixels(this.width, data.x),
+      y: this.height - convertPercentToPixels(this.height, data.y),
+    });
+    card.setSize(card.spriteCard.width, card.spriteCard.height);
+    card.setScale(this.cardScale);
+    return card;
+  }
+
+  createPlayerHandDropZone() {
       let playerHandDropZone = this.add.image(0, 0, "playerHandDropZone");
       playerHandDropZone.setScale(this.cardScale);
       let dropZoneContainer = this.add.container(
-        width / 2,
-        height - playerHandDropZone.height / 2,
+        this.width / 2,
+        this.height - playerHandDropZone.height / 2,
         [ playerHandDropZone ]
       );
       dropZoneContainer.setSize(playerHandDropZone.width, playerHandDropZone.height);
@@ -465,6 +476,7 @@ class MainScene extends Phaser.Scene {
     this.resetPlayerHandPositions();
     dropZone.list[0].clearTint();
     this.updatePlayerCards(this.playerDeck, MESSAGE_UPDATE_DECK);
+    this.informOtherPlayerOfCardMove(gameObject, true);
   }
 
   dropOnPlayerCard(gameObject, dropZone) {
@@ -478,10 +490,12 @@ class MainScene extends Phaser.Scene {
     }
     this.setToNotDraggable(gameObject);
     this.containers[dropZone.name].disableInteractive()
-    this.updatePlayerCards(this.playerDeck);
+    this.updatePlayerCards(this.playerDeck, MESSAGE_UPDATE_HAND);
+    this.informOtherPlayerOfCardMove(gameObject, true);
   }
 
   update(time, delta) {
+    this.frameCount += 1;
   }
 }
 
