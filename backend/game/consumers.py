@@ -1,7 +1,12 @@
+import functools
 import json
 from typing import Dict, List
 
+from asgiref.sync import async_to_sync
+from channels.exceptions import StopConsumer
 from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.layers import get_channel_layer
+from channels.utils import await_many_dispatch
 from django.core.cache import cache
 
 # Connecting messages
@@ -15,6 +20,7 @@ MESSAGE_CHAT = "chat"
 MESSAGE_MOVE_CARD = "move_card"
 MESSAGE_OTHER_PLAYER_CARD_MOVED = "other_player_card_moved"
 MESSAGE_OTHER_PLAYER_UPDATED_DECK = "other_player_updated_deck"
+MESSAGE_UPDATE_DROP_ZONE = "update_drop_zone"
 MESSAGE_TYPE_PLAYER_MESSAGE = "player_message"
 
 # Handler types
@@ -45,18 +51,72 @@ GAME_TIME_TO_LIVE = 3600  # one hour
 #               "name": "",
 #               "deck": [],
 #               "hand": [],
+#               "drop_zones": {
+#                   "playerCard1": None,
+#                   "playerCard2": None,
+#                   "playerCard3": None,
+#                   "playerCard4": None,
+#                   "playerCard5": None,
+#                   "playerCard6": None,
+#               },
 #            },
 #           "player2": {
 #               "name": "",
 #               "deck": [],
 #               "hand": [],
+#               "drop_zones": {
+#                   "playerCard1": None,
+#                   "playerCard2": None,
+#                   "playerCard3": None,
+#                   "playerCard4": None,
+#                   "playerCard5": None,
+#                   "playerCard6": None,
+#               },
 #           },
 #       },
 # 	},
 # }
 
 
-class GameConsumer(AsyncWebsocketConsumer):
+class CustomAsyncWebsocketConsumer(AsyncWebsocketConsumer):
+    """
+    Custom AsyncWebsocketConsumer allows for client to decide channel name.
+    """
+
+    async def __call__(self, scope, receive, send):
+        """
+        Dispatches incoming messages to type-based handlers asynchronously.
+        """
+        self.scope = scope
+
+        # Initialize channel layer
+        self.channel_layer = get_channel_layer(self.channel_layer_alias)
+        if self.channel_layer is not None:
+            self.channel_name = (
+                self.scope["url_route"]["kwargs"]["channel_name"]
+            )
+            self.channel_receive = functools.partial(
+                self.channel_layer.receive, self.channel_name
+            )
+        # Store send function
+        if self._sync:
+            self.base_send = async_to_sync(send)
+        else:
+            self.base_send = send
+        # Pass messages in from channel layer or client to dispatch method
+        try:
+            if self.channel_layer is not None:
+                await await_many_dispatch(
+                    [receive, self.channel_receive], self.dispatch
+                )
+            else:
+                await await_many_dispatch([receive], self.dispatch)
+        except StopConsumer:
+            # Exit cleanly
+            pass
+
+
+class GameConsumer(CustomAsyncWebsocketConsumer):
 
     player_group_assigned = False
 
@@ -143,8 +203,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
     async def assign_player_group(self, player_id: str, deck: List) -> str:
-        print(f"trying with channel {self.channel_name}")
-
         if self.player_group_assigned:
             return self.MESSAGE_CONNECTED
 
@@ -155,17 +213,27 @@ class GameConsumer(AsyncWebsocketConsumer):
             game["player1"] = {
                 "name": player_id,
                 "deck": deck,
+                "hand": [],
+                "drop_zones": {
+                    "playerZone1": None,
+                    "playerZone2": None,
+                    "playerZone3": None,
+                    "playerZone4": None,
+                    "playerZone5": None,
+                    "playerZone6": None,
+                },
             }
             text = self.MESSAGE_CONNECTED
 
             # Join player1 group
-            print(f"player1 is channel {self.channel_name}")
             await self.channel_layer.group_add(
                 "player1",
                 self.channel_name,
             )
             self.player_group_assigned = True
-
+        elif game["player1"]["name"] == self.channel_name:
+            # This means the player is reconnecting
+            text = self.MESSAGE_CONNECTED
         elif game["player1"]["name"] == player_id:
             text = self.MESSAGE_RECONNECTED
 
@@ -174,6 +242,15 @@ class GameConsumer(AsyncWebsocketConsumer):
             game["player2"] = {
                 "name": player_id,
                 "deck": deck,
+                "hand": [],
+                "drop_zones": {
+                    "playerZone1": None,
+                    "playerZone2": None,
+                    "playerZone3": None,
+                    "playerZone4": None,
+                    "playerZone5": None,
+                    "playerZone6": None,
+                },
             }
             text = self.MESSAGE_CONNECTED
             # Remove game from available games
@@ -184,13 +261,14 @@ class GameConsumer(AsyncWebsocketConsumer):
                 cache.set("available_games", games, GAME_TIME_TO_LIVE)
 
             # Join player2 group
-            print(f"player2 is channel {self.channel_name}")
             await self.channel_layer.group_add(
                 "player2",
                 self.channel_name,
             )
             self.player_group_assigned = True
-
+        elif game["player2"]["name"] == self.channel_name:
+            # This means the player is reconnecting
+            text = self.MESSAGE_CONNECTED
         elif game["player2"]["name"] == player_id:
             text = self.MESSAGE_RECONNECTED
 
@@ -219,7 +297,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         message = event["message"]
         player = message["origin"]["player"]
         game = cache.get(self.game_name)
-        game[player]["deck"] = message["data"]["cards"]
+        game[player]["deck"] = message["data"]
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
         await self.channel_layer.group_send(
             self.get_player_group_to_send_to(event["message"]),
@@ -239,7 +317,6 @@ class GameConsumer(AsyncWebsocketConsumer):
         else:
             return "player1"
 
-
     async def update_deck_handler(self, event: Dict):
         await self.send(
             text_data=json.dumps(
@@ -256,7 +333,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         message = event["message"]
         player = message["origin"]["player"]
         game = cache.get(self.game_name)
-        game[player]["hand"] = message["data"]["cards"]
+        game[player]["hand"] = message["data"]
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
         await self.channel_layer.group_send(
             self.get_player_group_to_send_to(event["message"]),
@@ -286,7 +363,7 @@ class GameConsumer(AsyncWebsocketConsumer):
         message = event["message"]
         player = message["origin"]["player"]
         game = cache.get(self.game_name)
-        moved_card = message["data"]["card"]
+        moved_card = message["data"]
         game[player]["deck"] = [
             card if card["id"] != moved_card["id"] else moved_card
             for card in game[player]["deck"]
@@ -308,6 +385,41 @@ class GameConsumer(AsyncWebsocketConsumer):
         )
 
     async def move_card_handler(self, event: Dict):
+        message = event["message"]
+        await self.send(
+            text_data=json.dumps(
+                {
+                    "type": MESSAGE_OTHER_PLAYER_CARD_MOVED,
+                    "origin": message["origin"],
+                    "text": message["text"],
+                    "game": message["game"],
+                    "data": message["data"],
+                }
+            )
+        )
+
+    async def update_drop_zone(self, event: Dict):
+        message = event["message"]
+        player = message["origin"]["player"]
+        game = cache.get(self.game_name)
+        game[player]["drop_zones"][message["data"]["name"]] = (
+            message["data"]["card"]
+        )
+        cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
+        await self.channel_layer.group_send(
+            self.get_player_group_to_send_to(event["message"]),
+            {
+                "type": "update_drop_zone_handler",
+                "message": {
+                    "origin": event["message"]["origin"],
+                    "text": None,
+                    "game": game,
+                    "data": message["data"],
+                }
+            },
+        )
+
+    async def update_drop_zone_handler(self, event: Dict):
         message = event["message"]
         await self.send(
             text_data=json.dumps(
