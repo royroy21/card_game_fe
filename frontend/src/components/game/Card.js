@@ -53,6 +53,7 @@ class Card extends Phaser.GameObjects.Container {
       depth,
     };
     this.id = id;
+    this.isHidden = false;
     this.spriteCard = spriteCard;
     this.textName = textName;
     this.cardName = name;

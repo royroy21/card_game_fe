@@ -8,6 +8,7 @@ import eventsCenter from "./EventsCenter";
 import loadAssets from "./assetLoader";
 import HiddenCard from "./HiddenCard";
 import {convertPercentToPixels, convertPixelsToPercent} from "../utils/percent";
+import CenterMessage from "./CenterMessage";
 
 // Connecting messages
 const MESSAGE_TYPE_CONNECT_PLAYER = "connect_player";
@@ -17,44 +18,40 @@ const MESSAGE_TYPE_PLAYER_CONNECTED = "player_connected";
 
 // Game messages
 const MESSAGE_CHAT = "chat";
-const MESSAGE_OTHER_PLAYER_UPDATED_DECK = "other_player_updated_deck";
-const MESSAGE_UPDATE_DECK = "update_deck";
-const MESSAGE_UPDATE_DROP_ZONE = "update_drop_zone";
-const MESSAGE_UPDATE_HAND = "update_hand";
-const MESSAGE_MOVE_CARD = "move_card";
-const MESSAGE_OTHER_PLAYER_CARD_MOVED = "other_player_card_moved";
+const MESSAGE_CREATE_ENEMY_DECK = "create_enemy_deck";
+const MESSAGE_MOVING_CARD = "moving_card";
+const MESSAGE_MOVED_CARD = "moved_card";
+const MESSAGE_ENEMY_CARD_MOVING = "enemy_card_moving";
+const MESSAGE_ENEMY_CARD_MOVED = "enemy_card_moved";
 
 class MainScene extends Phaser.Scene {
-  constructor( ) {
+  constructor() {
     super('MainScene');
     this.cardScale = 0.5;  // This is a base value and will be increased for larger screens.
     this.numberOfCards = 30;
-    this.numberOfZones = 6;
+    this.zones = ["1", "2", "3", "4", "5", "6"]; // Player/Enemy card zones.
     this.playerDeck = [];
     this.playerHand = [];
+    this.enemyCards = []; // Array containing all enemy cards.
     this.enemyDeck = [];
     this.enemyHand = [];
-    this.otherPlayerCardYOffSet = 600;
     this.containers = {};
     this.tintColour = 0x44ff44;
     this.hasCardFocus = false;
 
+    this.isPlayerTurn = false;
     this.player = null;  // stores if player1 or player2
     this.playerID = null;
-    this.game = null;
+    this.gameState = null;
     this.isConnected = false;
 
     this.frameCount = 0;
-    this.informOtherPlayerOfCardMoveCount = null;
+    this.informEnemyOfCardMoveCount = null;
   }
 
   preload() {
     loadAssets(this);
     this.canvas = this.sys.game.canvas;
-  }
-
-  getOtherPlayer() {
-    return this.player === "player2" ? "player1" : "player2"
   }
 
   create() {
@@ -128,77 +125,79 @@ class MainScene extends Phaser.Scene {
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
 
-      console.log("message received: ", message, this.enemyHand);
+      console.log("message received: ", this.player, message);
 
       switch (message.type) {
         case MESSAGE_TYPE_PLAYER_CONNECTED:
-          // Add updated game object
-          this.game = message.game;
+          // Add updated game state
+          this.gameState = message.game;
 
           // If this.player is not set then this player has
           // freshly connected so needs to repopulate game state
           if (!this.player) {
             // Update if this is player1 or player 2
-            this.player = this.game.player1.name === this.playerID ? "player1" : "player2";
+            this.player = this.gameState.player1.name === this.playerID ? "player1" : "player2";
             // Create game state
             this.createPlayerCardDeck(message);
             this.populatePlayerHand(message);
             this.populatePlayerZones(message);
             this.populateEnemyHand(message);
             this.populateEnemyZones(message);
-            this.createEnemyPlayerDeck(message);
-
-            eventsCenter.emit("game", message);
+            this.createEnemyDeck(message);
+            this.enemyCards = [
+              ...this.enemyDeck,
+              ...this.enemyHand,
+              ...this.getActiveCardsFromDropZones("enemy"),
+            ];
+          }
+          eventsCenter.emit("game", message);
+          if (!message.game[this.getEnemyPlayer()]) {
+            eventsCenter.emit("game", {
+              origin: {
+                  "name": "Server",
+                  "player": null
+              },
+              text: "Waiting for enemy to join ...",
+            });
+          } else {
+            if (this.player === "player1") {
+              this.displayCenterMessage("You start");
+            } else {
+              this.displayCenterMessage("Enemy starts");
+            }
           }
           break;
         case MESSAGE_CHAT:
           eventsCenter.emit("game", message);
           break;
-        case MESSAGE_OTHER_PLAYER_UPDATED_DECK:
-          if (!message.game[this.getOtherPlayer()]) {
+        case MESSAGE_CREATE_ENEMY_DECK:
+          this.gameState = message.game;
+          if (!message.game[this.getEnemyPlayer()]) {
             break;
           }
-          const created = this.createEnemyPlayerDeck(message);
-          if (created) {
-            break;
-          }
+          this.createEnemyDeck(message);
+          this.enemyCards = this.enemyDeck.map(card => card);
           break;
-          // const otherPlayerUpdatedCardIds = (
-          //   message.game[this.getOtherPlayer()].deck.map(card => card.id)
-          // )
-          // this.enemyDeck = this.enemyDeck.filter(
-          //   card => otherPlayerUpdatedCardIds.includes(card.id)
-          // )
-        case MESSAGE_OTHER_PLAYER_CARD_MOVED:
-          const updateDatedCardData = message["data"]["card"]
+        case MESSAGE_ENEMY_CARD_MOVING:
+          const cardData = message["data"]
 
-          // Update card from enemy deck
-          if (this.enemyDeck.map(card => card.id).includes(updateDatedCardData.id)) {
-            this.enemyDeck = this.enemyDeck.map(card => {
-              if (card.id === updateDatedCardData.id) {
-                card.x = this.width - convertPercentToPixels(this.width, updateDatedCardData.x);
-                card.y = this.height - convertPercentToPixels(this.height, updateDatedCardData.y);
+          if (this.enemyCards.map(card => card.id).includes(cardData.id)) {
+            this.enemyCards = this.enemyCards.map(card => {
+              if (card.id === cardData.id) {
+                card.x = this.width - convertPercentToPixels(this.width, cardData.x);
+                card.y = this.height - convertPercentToPixels(this.height, cardData.y);
                 this.children.bringToTop(card);
               }
               return card;
             })
             break
           }
-          // Update card from enemy hand
-          if (this.enemyHand.map(card => card.id).includes(updateDatedCardData.id)) {
-            this.enemyHand = this.enemyHand.map(card => {
-              if (card.id === updateDatedCardData.id) {
-                card.x = this.width - convertPercentToPixels(this.width, updateDatedCardData.x);
-                card.y = this.height - convertPercentToPixels(this.height, updateDatedCardData.y);
-                this.children.bringToTop(card);
-              }
-              return card;
-            })
-            break;
-          }
+          break
+        case MESSAGE_ENEMY_CARD_MOVED:
+          this.gameState = message.game;
+          this.updateEnemyFromGameState();
+          break
       }
-      console.log("@this.enemyDeck: ", this.enemyDeck.length);
-      console.log("@this.enemyHand: ", this.enemyHand.length);
 
       // TODO game full logic still not fully working ;/
       // TODO this should go into this.socket.addEventListener('error',
@@ -226,7 +225,7 @@ class MainScene extends Phaser.Scene {
       gameObject.y = dragY;
       gameObject.rotation = 0;
       // gameObject.setScale(this.cardScale);
-      this.informOtherPlayerOfCardMove(gameObject);
+      this.informEnemyOfCardMoving(gameObject);
     });
 
     this.input.on('dragenter', (pointer, gameObject, dropZone) => {
@@ -255,7 +254,7 @@ class MainScene extends Phaser.Scene {
       if (!dropped) {
         gameObject.x = gameObject.input.dragStartX;
         gameObject.y = gameObject.input.dragStartY;
-        this.informOtherPlayerOfCardMove(gameObject, true);
+        this.informEnemyOfCardMove(gameObject, true);
       }
       this.hasCardFocus = false;
     });
@@ -286,44 +285,8 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  createPlayerDropZones() {
-    const sectionSize = this.width / this.numberOfZones;
-    const centerOfSection = sectionSize / 2;
-
-    ["1", "2", "3", "4", "5", "6"].forEach(zone => {
-      let dropzone = this.add.image(0, 0, "dropzone");
-      dropzone.setScale(this.cardScale - 0.25);
-      let dropZoneContainer = this.add.container(
-        sectionSize * (parseInt(zone) - 1) + centerOfSection,
-        this.height / 2 + convertPercentToPixels(this.height, 12),
-        [ dropzone ]
-      );
-      dropZoneContainer.setSize(dropzone.width, dropzone.height);
-      dropZoneContainer.setInteractive();
-      dropZoneContainer.input.dropZone = true;
-      dropZoneContainer.name = "playerZone" + zone;
-      this.containers[dropZoneContainer.name] = dropZoneContainer;
-    })
-
-  }
-
-  createEnemyDropZones() {
-    // When first created enemy drop zones are not active.
-    const sectionSize = this.width / this.numberOfZones;
-    const centerOfSection = sectionSize / 2;
-
-    ["6", "5", "4", "3", "2", "1"].forEach(zone => {
-      let dropzone = this.add.image(0, 0, "dropzone");
-      dropzone.setScale(this.cardScale - 0.25);
-      let dropZoneContainer = this.add.container(
-        sectionSize * (Math.abs(parseInt(zone) - 6)) + centerOfSection,
-        this.height / 2 - convertPercentToPixels(this.height, 12),
-        [ dropzone ]
-      );
-      dropZoneContainer.setSize(dropzone.width, dropzone.height);
-      dropZoneContainer.name = "enemyZone" + zone;
-      this.containers[dropZoneContainer.name] = dropZoneContainer;
-    })
+  getEnemyPlayer() {
+    return this.player === "player2" ? "player1" : "player2"
   }
 
   setToDraggable(gameObject) {
@@ -348,97 +311,20 @@ class MainScene extends Phaser.Scene {
     });
   }
 
-  createEnemyPlayerDeck(message) {
-    if (this.enemyDeck.length === 0 && message.game[this.getOtherPlayer()] !== null) {
-      this.enemyDeck = (
-        message.game[this.getOtherPlayer()].deck.map(card => this.createEnemyCard({
-          scene: this,
-          ...card,
-          x: this.width - convertPercentToPixels(this.width, card.x),
-          y: this.height - convertPercentToPixels(this.height, card.y),
-        }))
-      );
-      return true;
-    } else {
-      return false;
-    }
-  }
-
-  updatePlayerCards(type, data) {
-    // type is MESSAGE_UPDATE_DECK or MESSAGE_UPDATE_HAND or MESSAGE_UPDATE_DROP_ZONE
-
-    this.socket.send(JSON.stringify({
-      type,
-      message: {
-        origin: {
-          name: this.playerID,
-          player: this.player,
-        },
-        text: null,
-        data,
-        game: this.game,
-      }
-    }));
-  }
-
-  cardMoveUpdateRate = 60;
-
-  informOtherPlayerOfCardMove(card, forceUpdate=false) {
-    // Only perform this action every x frames
-    if (!forceUpdate) {
-      if (!this.informOtherPlayerOfCardMoveCount) {
-        this.informOtherPlayerOfCardMoveCount = this.frameCount;
-      }
-      if (
-        this.frameCount
-        - this.informOtherPlayerOfCardMoveCount
-        > this.cardMoveUpdateRate
-      ) {
-        return
-      }
-    }
-
-    const data = {
-      type: MESSAGE_MOVE_CARD,
-      message: {
-        origin: {
-          name: this.playerID,
-          player: this.player,
-        },
-        text: null,
-        data: {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        },
-        game: this.game,
-      }
-    };
-    this.socket.send(JSON.stringify(data));
-    this.informOtherPlayerOfCardMoveCount = null;
-  }
-
   setToNotDraggable(gameObject) {
     gameObject.spriteCard.clearTint();
     gameObject.disableInteractive();
   }
 
-  createPlayerCardDeck(message) {
-    const x = this.width / 6 * 5;
-    const y = this.height / 2 + convertPercentToPixels(this.height, 35);
-    const deckLength = message.game[this.player].deck.length;
-    this.playerDeck = message.game[this.player].deck.map((cardData, index) => {
-      const card = this.createCard({
-        scene: this,
-        ...cardData,
-        x: x + getRandomNumber(-3, 3, 1),
-        y: y + getRandomNumber(-3, 3, 1),
-      })
-      if (index === deckLength - 1) {
-        this.setToDraggable(card);
-      }
-      return card;
-    })
+  displayCenterMessage(message) {
+    const centerMessage = new CenterMessage(this, message)
+    centerMessage.setSize(centerMessage.textName.width, centerMessage.textName.height);
+    centerMessage.setScale(this.cardScale);
+    function destroyCenterMessage() {
+      centerMessage.fadeThenDestroy();
+      clearTimeout(myTimeout);
+    }
+    const myTimeout = setTimeout(destroyCenterMessage, 2000);
   }
 
   createPlayerCardDeckData() {
@@ -469,6 +355,142 @@ class MainScene extends Phaser.Scene {
     return cardData;
   }
 
+  createPlayerCardDeck(message) {
+    const x = this.width / 6 * 5;
+    const y = this.height / 2 + convertPercentToPixels(this.height, 35);
+    const deckLength = message.game[this.player].deck.length;
+    this.playerDeck = message.game[this.player].deck.map((cardData, index) => {
+      const card = this.createCard({
+        scene: this,
+        ...cardData,
+        x: x + getRandomNumber(-3, 3, 1),
+        y: y + getRandomNumber(-3, 3, 1),
+      })
+      if (index === deckLength - 1) {
+        this.setToDraggable(card);
+      }
+      return card;
+    })
+  }
+
+  createPlayerDropZones() {
+    const sectionSize = this.width / this.zones.length;
+    const centerOfSection = sectionSize / 2;
+
+    this.zones.forEach(zone => {
+      let dropzone = this.add.image(0, 0, "dropzone");
+      dropzone.setScale(this.cardScale - 0.25);
+      let dropZoneContainer = this.add.container(
+        sectionSize * (parseInt(zone) - 1) + centerOfSection,
+        this.height / 2 + convertPercentToPixels(this.height, 12),
+        [ dropzone ]
+      );
+      dropZoneContainer.setSize(dropzone.width, dropzone.height);
+      dropZoneContainer.setInteractive();
+      dropZoneContainer.input.dropZone = true;
+      dropZoneContainer.name = "playerZone" + zone;
+      this.containers[dropZoneContainer.name] = dropZoneContainer;
+    })
+
+  }
+  createEnemyDropZones() {
+    // When first created enemy drop zones are not active.
+    const sectionSize = this.width / this.zones.length;
+    const centerOfSection = sectionSize / 2;
+
+    this.zones.reverse().forEach(zone => {
+      let dropzone = this.add.image(0, 0, "dropzone");
+      dropzone.setScale(this.cardScale - 0.25);
+      let dropZoneContainer = this.add.container(
+        sectionSize * (Math.abs(parseInt(zone) - 6)) + centerOfSection,
+        this.height / 2 - convertPercentToPixels(this.height, 12),
+        [ dropzone ]
+      );
+      dropZoneContainer.setSize(dropzone.width, dropzone.height);
+      dropZoneContainer.name = "enemyZone" + zone;
+      this.containers[dropZoneContainer.name] = dropZoneContainer;
+    })
+  }
+
+  getActiveCardsFromDropZones(player) {
+    // player is "player" or "enemy"
+    return this.zones.map(zone => {
+      const card = this.containers[player + "Zone" + zone];
+      if (card.type !== "Container") {
+        return card;
+      }
+    }).filter(card => card);
+  }
+
+  createEnemyDeck(message) {
+    if (this.enemyDeck.length === 0 && message.game[this.getEnemyPlayer()] !== null) {
+      this.enemyDeck = (
+        message.game[this.getEnemyPlayer()].deck.map(card => this.createHiddenCard({
+          scene: this,
+          ...card,
+          x: this.width - convertPercentToPixels(this.width, card.x),
+          y: this.height - convertPercentToPixels(this.height, card.y),
+        }))
+      );
+    }
+  }
+
+  cardMoveUpdateRate = 60;
+
+  informEnemyOfCardMoving(card) {
+    // Only perform this action every x frames
+    if (!this.informEnemyOfCardMoveCount) {
+      this.informEnemyOfCardMoveCount = this.frameCount;
+    }
+    if (
+      this.frameCount
+      - this.informEnemyOfCardMoveCount
+      > this.cardMoveUpdateRate
+    ) {
+      return
+    }
+
+    const data = {
+      type: MESSAGE_MOVING_CARD,
+      message: {
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
+        text: null,
+        data: {
+          ...card.initialData,
+          x: convertPixelsToPercent(this.width, card.x),
+          y: convertPixelsToPercent(this.height, card.y),
+        },
+        game: this.gameState,
+      }
+    };
+    this.socket.send(JSON.stringify(data));
+    this.informEnemyOfCardMoveCount = null;
+  }
+
+  informEnemyOfCardMoved(card) {
+    const data = {
+      type: MESSAGE_MOVED_CARD,
+      message: {
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
+        text: null,
+        data: {
+          ...card.initialData,
+          x: convertPixelsToPercent(this.width, card.x),
+          y: convertPixelsToPercent(this.height, card.y),
+        },
+        game: this.gameState,
+      }
+    };
+    this.socket.send(JSON.stringify(data));
+    this.informEnemyOfCardMoveCount = null;
+  }
+
   populatePlayerHand(message) {
     if (message.game[this.player].hand.length === 0) {
       return
@@ -491,7 +513,7 @@ class MainScene extends Phaser.Scene {
   }
 
   populateEnemyHand(message) {
-    if (!message.game[this.getOtherPlayer()]) {
+    if (!message.game[this.getEnemyPlayer()]) {
       return
     }
     if (this.enemyHand.length > 0) {
@@ -500,8 +522,8 @@ class MainScene extends Phaser.Scene {
 
     this.enemyHand = [];
     const dropZone = this.containers["enemyHand"];
-    message.game[this.getOtherPlayer()].hand.forEach(data => {
-      const card = this.createEnemyCard({
+    message.game[this.getEnemyPlayer()].hand.forEach(data => {
+      const card = this.createHiddenCard({
         scene: this,
         ...data,
         x: dropZone.x,
@@ -511,7 +533,6 @@ class MainScene extends Phaser.Scene {
       this.resetEnemyHandPositions();
       dropZone.list[0].clearTint();
     })
-    console.log("@populateEnemyHand: ", this.enemyHand);
   }
 
   populatePlayerZones(message) {
@@ -539,21 +560,23 @@ class MainScene extends Phaser.Scene {
   }
 
   populateEnemyZones(message) {
-    const enemyPlayer = message.game[this.getOtherPlayer()];
+    const enemyPlayer = message.game[this.getEnemyPlayer()];
     if (!enemyPlayer) {
       return
     }
 
-    ["1", "2", "3", "4", "5", "6"].forEach(zone => {
+    this.zones.forEach(zone => {
       const cardData = enemyPlayer.drop_zones["playerZone" + zone];
       if (cardData) {
         const dropZone = this.containers["enemyZone" + zone];
-        this.createCard({
+        const card = this.createCard({
           scene: this,
           ...cardData,
           x: dropZone.x,
           y: dropZone.y,
         });
+        dropZone.destroy();
+        this.containers["enemyZone" + zone] = card;
       }
     });
   }
@@ -565,7 +588,7 @@ class MainScene extends Phaser.Scene {
     return card;
   }
 
-  createEnemyCard(data) {
+  createHiddenCard(data) {
     const card = new HiddenCard(data);
     card.setSize(card.spriteCard.width, card.spriteCard.height);
     card.setScale(this.cardScale);
@@ -610,6 +633,7 @@ class MainScene extends Phaser.Scene {
       let lastPosition = dropZone.x + dropZone.width / 4;
       for (let index = 0; index < this.playerHand.length; index++) {
         this.playerHand[index].x = lastPosition - 80;
+        this.playerHand[index].y = dropZone.y;
         lastPosition = this.playerHand[index].x;
       }
       this.setHandDepths(this.playerHand);
@@ -622,6 +646,7 @@ class MainScene extends Phaser.Scene {
       let lastPosition = dropZone.x + dropZone.width / 4;
       for (let index = 0; index < this.enemyHand.length; index++) {
         this.enemyHand[index].x = lastPosition - 80;
+        this.enemyHand[index].y = dropZone.y;
         lastPosition = this.enemyHand[index].x;
       }
       this.setHandDepths(this.enemyHand);
@@ -630,6 +655,89 @@ class MainScene extends Phaser.Scene {
 
   setHandDepths(hand) {
     hand.forEach((card, index) => card.setDepth(index));
+  }
+
+  updateGameStateDeck(deck) {
+    this.gameState[this.player].deck = deck.map(card => {
+      return {
+        ...card.initialData,
+        x: convertPixelsToPercent(this.width, card.x),
+        y: convertPixelsToPercent(this.height, card.y),
+      }
+    })
+  };
+
+  updateGameStateHand(hand) {
+    this.gameState[this.player].hand = hand.map(card => {
+      return {
+        ...card.initialData,
+        x: convertPixelsToPercent(this.width, card.x),
+        y: convertPixelsToPercent(this.height, card.y),
+      }
+    })
+  };
+
+  updateGameStateZone(zone, card) {
+    this.gameState[this.player]["drop_zones"][zone] = {
+      ...card.initialData,
+      x: convertPixelsToPercent(this.width, card.x),
+      y: convertPixelsToPercent(this.height, card.y),
+    }
+  };
+
+  updateEnemyFromGameState() {
+    this.updateEnemyDeckFromGameState();
+    this.updateEnemyHandFromGameState();
+    this.updateEnemyZonesFromGameState();
+  }
+
+  updateEnemyDeckFromGameState() {
+    const deckIds = this.gameState[this.getEnemyPlayer()].deck.map(card => card.id);
+    this.enemyDeck = this.enemyCards.filter(card => deckIds.includes(card.id));
+  }
+
+  updateEnemyHandFromGameState() {
+    const handIds = this.gameState[this.getEnemyPlayer()].hand.map(card => card.id);
+    this.enemyHand = this.enemyCards.filter(card => handIds.includes(card.id));
+    this.resetEnemyHandPositions();
+  }
+
+  updateEnemyZonesFromGameState() {
+    this.zones.forEach(zone => {
+      const cardData = this.gameState[this.getEnemyPlayer()]["drop_zones"]["playerZone" + zone];
+      if (cardData) {
+        const container = this.containers["enemyZone" + zone];
+
+        // Card is already in correct place.
+        if (container.id === cardData.id && !container.isHidden) {
+          return
+        }
+
+        // Remove card from enemy cards as
+        // hidden card will be recreated as card.
+        this.enemyCards = this.enemyCards.filter(card => {
+          if (card.id === cardData.id) {
+            card.destroy()
+          } else {
+            return card;
+          }
+        })
+        const dropZoneX = container.x;
+        const dropZoneY = container.y;
+        // Destroy zone container here.
+        // Will be replaced with card.
+        container.destroy();
+
+        const card = this.createCard({
+          scene: this,
+          ...cardData,
+          x: dropZoneX,
+          y: dropZoneY,
+        });
+        this.enemyCards.push(card);
+        this.containers["enemyZone" + zone] = card;
+      }
+    })
   }
 
   dropOnPlayerHand(gameObject, dropZone) {
@@ -650,27 +758,9 @@ class MainScene extends Phaser.Scene {
     }
     this.resetPlayerHandPositions();
     dropZone.list[0].clearTint();
-    this.updatePlayerCards(
-      MESSAGE_UPDATE_DECK,
-      this.playerDeck.map(card => {
-        return {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        }
-      }),
-    );
-    this.updatePlayerCards(
-      MESSAGE_UPDATE_HAND,
-      this.playerHand.map(card => {
-        return {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        }
-      }),
-    );
-    this.informOtherPlayerOfCardMove(gameObject, true);
+    this.updateGameStateDeck(this.playerDeck);
+    this.updateGameStateHand(this.playerHand);
+    this.informEnemyOfCardMoved(gameObject, true);
   }
 
   dropOnPlayerZone(gameObject, dropZone) {
@@ -684,42 +774,18 @@ class MainScene extends Phaser.Scene {
     }
     this.setToNotDraggable(gameObject);
     this.containers[dropZone.name].disableInteractive()
-    this.updatePlayerCards(
-      MESSAGE_UPDATE_DECK,
-      this.playerDeck.map(card => {
-        return {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        }
-      }),
-    );
-    this.updatePlayerCards(
-      MESSAGE_UPDATE_DROP_ZONE,
-      {
-        name: dropZone.name,
-        card: {
-          ...gameObject.initialData,
-          x: convertPixelsToPercent(this.width, gameObject.x),
-          y: convertPixelsToPercent(this.height, gameObject.y),
-        }
-      }
-    );
-    this.updatePlayerCards(
-      MESSAGE_UPDATE_HAND,
-      this.playerHand.map(card => {
-        return {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        }
-      }),
-    );
-    this.informOtherPlayerOfCardMove(gameObject, true);
+    this.updateGameStateDeck(this.playerDeck);
+    this.updateGameStateHand(this.playerHand);
+    this.updateGameStateZone(dropZone.name, gameObject);
+    this.informEnemyOfCardMoved(gameObject, true);
   }
 
   update(time, delta) {
     this.frameCount += 1;
+  }
+
+  activatePlayerTurn() {
+
   }
 }
 

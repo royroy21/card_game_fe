@@ -74,6 +74,10 @@ const loadAssets = (scene) => {
       'playerHandDropZone',
       'assets/playerHandDropZone.png',
     );
+    scene.load.image(
+      'centerMessage',
+      'assets/centerMessage.png',
+    );
 
     // Fonts
     scene.load.bitmapFont(

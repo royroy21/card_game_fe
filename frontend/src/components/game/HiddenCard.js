@@ -35,6 +35,7 @@ class HiddenCard extends Phaser.GameObjects.Container {
       depth,
     };
     this.id = id;
+    this.isHidden = true;
     this.spriteCard = spriteCard;
     this.scene = scene;
     this.scene.add.existing(this);
