@@ -9,6 +9,7 @@ import loadAssets from "./assetLoader";
 import HiddenCard from "./HiddenCard";
 import {convertPercentToPixels, convertPixelsToPercent} from "../utils/percent";
 import CenterMessage from "./CenterMessage";
+import EndTurnButton from "./EndTurnButton";
 
 // Connecting messages
 const MESSAGE_TYPE_CONNECT_PLAYER = "connect_player";
@@ -23,6 +24,7 @@ const MESSAGE_MOVING_CARD = "moving_card";
 const MESSAGE_MOVED_CARD = "moved_card";
 const MESSAGE_ENEMY_CARD_MOVING = "enemy_card_moving";
 const MESSAGE_ENEMY_CARD_MOVED = "enemy_card_moved";
+const MESSAGE_ENEMY_ENDED_TURN = "enemy_ended_turn";
 
 class MainScene extends Phaser.Scene {
   constructor() {
@@ -30,6 +32,7 @@ class MainScene extends Phaser.Scene {
     this.cardScale = 0.5;  // This is a base value and will be increased for larger screens.
     this.numberOfCards = 30;
     this.zones = ["1", "2", "3", "4", "5", "6"]; // Player/Enemy card zones.
+    this.playerCards = []; // Array containing all player cards.
     this.playerDeck = [];
     this.playerHand = [];
     this.enemyCards = []; // Array containing all enemy cards.
@@ -39,14 +42,18 @@ class MainScene extends Phaser.Scene {
     this.tintColour = 0x44ff44;
     this.hasCardFocus = false;
 
+    this.gameInitated = false;
     this.isPlayerTurn = false;
-    this.player = null;  // stores if player1 or player2
+    this.player = null;  // Stores if player1 or player2.
     this.playerID = null;
+    this.playerCardsActivated = false;
     this.gameState = null;
     this.isConnected = false;
 
     this.frameCount = 0;
     this.informEnemyOfCardMoveCount = null;
+
+    this.endTurnButton = null;
   }
 
   preload() {
@@ -101,6 +108,7 @@ class MainScene extends Phaser.Scene {
         },
         game: {
           gameID: this.getGameID(),
+          turn: null,
           player1: null,
           player2: null,
         }
@@ -132,23 +140,12 @@ class MainScene extends Phaser.Scene {
           // Add updated game state
           this.gameState = message.game;
 
-          // If this.player is not set then this player has
-          // freshly connected so needs to repopulate game state
-          if (!this.player) {
-            // Update if this is player1 or player 2
-            this.player = this.gameState.player1.name === this.playerID ? "player1" : "player2";
-            // Create game state
-            this.createPlayerCardDeck(message);
-            this.populatePlayerHand(message);
-            this.populatePlayerZones(message);
-            this.populateEnemyHand(message);
-            this.populateEnemyZones(message);
-            this.createEnemyDeck(message);
-            this.enemyCards = [
-              ...this.enemyDeck,
-              ...this.enemyHand,
-              ...this.getActiveCardsFromDropZones("enemy"),
-            ];
+          // If this.player or this.enemyCards is not set then this client
+          // has freshly connected so needs to repopulate game state.
+          // Note this.player can be set without this.enemyCards as player 1
+          // will often connect without player 2 ready.
+          if (!this.player || !this.enemyCards.length) {
+            this.initiateGame(message);
           }
           eventsCenter.emit("game", message);
           if (!message.game[this.getEnemyPlayer()]) {
@@ -160,7 +157,7 @@ class MainScene extends Phaser.Scene {
               text: "Waiting for enemy to join ...",
             });
           } else {
-            if (this.player === "player1") {
+            if (this.isPlayerTurn) {
               this.displayCenterMessage("You start");
             } else {
               this.displayCenterMessage("Enemy starts");
@@ -197,6 +194,15 @@ class MainScene extends Phaser.Scene {
           this.gameState = message.game;
           this.updateEnemyFromGameState();
           break
+        case MESSAGE_ENEMY_ENDED_TURN:
+          this.gameState = message.game;
+          this.isPlayerTurn = this.determineIsPlayerTurn();
+          if (this.isPlayerTurn) {
+            this.displayCenterMessage("Your turn");
+          } else {
+            this.displayCenterMessage("Enemy turn");
+          }
+          break
       }
 
       // TODO game full logic still not fully working ;/
@@ -228,19 +234,19 @@ class MainScene extends Phaser.Scene {
       this.informEnemyOfCardMoving(gameObject);
     });
 
-    this.input.on('dragenter', (pointer, gameObject, dropZone) => {
-      if (this.hasCardFocus) {
-        return
-      }
-      dropZone.list[0].setTint(this.tintColour);
-    });
+    // this.input.on('dragenter', (pointer, gameObject, dropZone) => {
+    //   if (this.hasCardFocus) {
+    //     return
+    //   }
+    //   dropZone.list[0].setTint(this.tintColour);
+    // });
 
-    this.input.on('dragleave', (pointer, gameObject, dropZone) => {
-      if (this.hasCardFocus) {
-        return
-      }
-      dropZone.list[0].clearTint();
-    });
+    // this.input.on('dragleave', (pointer, gameObject, dropZone) => {
+    //   if (this.hasCardFocus) {
+    //     return
+    //   }
+    //   dropZone.list[0].clearTint();
+    // });
 
     this.input.on('drop', (pointer, gameObject, dropZone) => {
       if (dropZone.name === "playerHand") {
@@ -287,6 +293,35 @@ class MainScene extends Phaser.Scene {
 
   getEnemyPlayer() {
     return this.player === "player2" ? "player1" : "player2"
+  }
+
+  initiateGame(message) {
+    // Update if this is player1 or player 2
+    this.player = this.gameState.player1.name === this.playerID ? "player1" : "player2";
+    // Create game state
+    this.createPlayerCardDeck(message);
+    this.populatePlayerHand(message);
+    this.populatePlayerZones(message);
+    this.populateEnemyHand(message);
+    this.populateEnemyZones(message);
+    this.createEnemyDeck(message);
+    this.enemyCards = [
+      ...this.enemyDeck,
+      ...this.enemyHand,
+      ...this.getActiveCardsFromDropZones("enemy"),
+    ];
+    this.playerCards = [
+      ...this.playerDeck,
+      ...this.playerHand,
+      ...this.getActiveCardsFromDropZones("player"),
+    ];
+    this.gameInitated = true;
+    this.deactivatePlayerCards();
+    this.isPlayerTurn = this.determineIsPlayerTurn();
+  }
+
+  determineIsPlayerTurn() {
+    return Boolean(this.player === this.gameState.turn);
   }
 
   setToDraggable(gameObject) {
@@ -358,18 +393,13 @@ class MainScene extends Phaser.Scene {
   createPlayerCardDeck(message) {
     const x = this.width / 6 * 5;
     const y = this.height / 2 + convertPercentToPixels(this.height, 35);
-    const deckLength = message.game[this.player].deck.length;
-    this.playerDeck = message.game[this.player].deck.map((cardData, index) => {
-      const card = this.createCard({
+    this.playerDeck = message.game[this.player].deck.map(cardData => {
+      return this.createCard({
         scene: this,
         ...cardData,
         x: x + getRandomNumber(-3, 3, 1),
         y: y + getRandomNumber(-3, 3, 1),
       })
-      if (index === deckLength - 1) {
-        this.setToDraggable(card);
-      }
-      return card;
     })
   }
 
@@ -549,12 +579,14 @@ class MainScene extends Phaser.Scene {
       const cardData = message.game[this.player].drop_zones[dropZoneName];
       if (cardData) {
         const dropZone = this.containers[dropZoneName];
-        this.createCard({
+        const card = this.createCard({
           scene: this,
           ...cardData,
           x: dropZone.x,
           y: dropZone.y,
         });
+        dropZone.destroy();
+        this.containers[dropZoneName] = card;
       }
     });
   }
@@ -773,7 +805,7 @@ class MainScene extends Phaser.Scene {
       this.setToDraggable(this.playerDeck[this.playerDeck.length - 1])
     }
     this.setToNotDraggable(gameObject);
-    this.containers[dropZone.name].disableInteractive()
+    this.containers[dropZone.name] = gameObject;
     this.updateGameStateDeck(this.playerDeck);
     this.updateGameStateHand(this.playerHand);
     this.updateGameStateZone(dropZone.name, gameObject);
@@ -782,10 +814,62 @@ class MainScene extends Phaser.Scene {
 
   update(time, delta) {
     this.frameCount += 1;
+    if (!this.gameInitated) {
+      return null;
+    }
+
+    if (!this.isPlayerTurn && this.playerCardsActivated) {
+      this.deactivatePlayerCards();
+    }
+
+    if (this.isPlayerTurn && !this.playerCardsActivated) {
+      this.activatePlayerCards();
+    }
   }
 
-  activatePlayerTurn() {
+  activatePlayerCards() {
+    // Activates first card on playerDeck and
+    // all cards in hand and in player zones.
 
+    this.playerDeck.map(card => card.spriteCard.clearTint());
+    const topCardOnDeck = this.playerDeck[this.playerDeck.length - 1];
+    this.setToDraggable(topCardOnDeck);
+    topCardOnDeck.spriteCard.clearTint();
+    this.playerHand.map(card => {
+      this.setToDraggable(card);
+      card.spriteCard.clearTint();
+    });
+    this.zones.forEach(zone => {
+      const cardData = this.gameState[this.player].drop_zones["playerZone" + zone];
+      if (cardData) {
+        const card = this.containers["playerZone" + zone];
+        this.setToDraggable(card);
+
+        console.log("@activatePlayerCards: ", card, zone, this.containers);
+
+        card.spriteCard.clearTint();
+      }
+    });
+    this.playerCardsActivated = true;
+    this.endTurnButton = this.displayEndTurnButton();
+  }
+
+  deactivatePlayerCards() {
+    this.playerCards.forEach(card => {
+      this.setToNotDraggable(card)
+      card.spriteCard.setTint("0xccccc");
+    });
+    this.playerCardsActivated = false;
+    if (this.endTurnButton) {
+      this.endTurnButton.destroy();
+    }
+  }
+
+  displayEndTurnButton() {
+    const button = new EndTurnButton(this)
+    button.setSize(button.textName.width, button.textName.height);
+    button.setScale(this.cardScale);
+    return button;
   }
 }
 

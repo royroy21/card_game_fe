@@ -78,6 +78,10 @@ const loadAssets = (scene) => {
       'centerMessage',
       'assets/centerMessage.png',
     );
+    scene.load.image(
+      'button',
+      'assets/button.png',
+    );
 
     // Fonts
     scene.load.bitmapFont(

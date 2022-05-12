@@ -1,6 +1,7 @@
 import functools
 import json
-from typing import Dict, List
+import random
+from typing import Dict, List, Optional
 
 from asgiref.sync import async_to_sync
 from channels.exceptions import StopConsumer
@@ -18,6 +19,7 @@ MESSAGE_CHAT = "chat"
 MESSAGE_ENEMY_CARD_MOVING = "enemy_card_moving"
 MESSAGE_ENEMY_CARD_MOVED = "enemy_card_moved"
 MESSAGE_CREATE_ENEMY_DECK = "create_enemy_deck"
+MESSAGE_ENEMY_ENDED_TURN = "enemy_ended_turn"
 
 GAME_TIME_TO_LIVE = 3600  # one hour
 
@@ -79,6 +81,7 @@ class GameConsumer(CustomWebsocketConsumer):
                 self.game_name,
                 {
                     "gameID": self.game_name,
+                    "turn": None,
                     "player1": None,
                     "player2": None,
                 },
@@ -132,7 +135,7 @@ class GameConsumer(CustomWebsocketConsumer):
             )
         )
         self.channel_layer.group_send(
-            self.get_enemy_player_group(event["message"]),
+            self.get_enemy_player(event["message"]),
             {
                 "type": "create_enemy_deck_handler",
                 "message": {
@@ -205,6 +208,9 @@ class GameConsumer(CustomWebsocketConsumer):
         else:
             connect_message = ERROR_GAME_IS_FULL
 
+        if not game["turn"]:
+            game["turn"] = self.determine_player_first_turn(game)
+
         # Update game to cache
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
 
@@ -225,6 +231,11 @@ class GameConsumer(CustomWebsocketConsumer):
             },
         }
 
+    def determine_player_first_turn(self, game: Dict) -> Optional[str]:
+        if game["player1"] and game["player2"]:
+            return random.choice(["player1", "player2"])
+        return None
+
     def chat(self, event: Dict):
         self.send(
             text_data=json.dumps(
@@ -237,7 +248,7 @@ class GameConsumer(CustomWebsocketConsumer):
             )
         )
 
-    def get_enemy_player_group(self, message: Dict) -> str:
+    def get_enemy_player(self, message: Dict) -> str:
         player = message["origin"]["player"]
         return "player2" if player == "player1" else "player1"
 
@@ -267,6 +278,21 @@ class GameConsumer(CustomWebsocketConsumer):
                     "text": message["text"],
                     "game": game,
                     "data": message["data"],
+                }
+            )
+        )
+
+    def end_turn(self, event: Dict):
+        message = event["message"]
+        game = cache.get(self.game_name)
+        game["turn"] = self.get_enemy_player(message)
+        cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
+        self.send(
+            text_data=json.dumps(
+                {
+                    "type": MESSAGE_ENEMY_ENDED_TURN,
+                    "origin": message["origin"],
+                    "game": game,
                 }
             )
         )
