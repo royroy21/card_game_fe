@@ -4,7 +4,7 @@ from typing import Dict, List
 
 from asgiref.sync import async_to_sync
 from channels.exceptions import StopConsumer
-from channels.generic.websocket import AsyncWebsocketConsumer
+from channels.generic.websocket import WebsocketConsumer
 from channels.layers import get_channel_layer
 from channels.utils import await_many_dispatch
 from django.core.cache import cache
@@ -22,7 +22,7 @@ MESSAGE_CREATE_ENEMY_DECK = "create_enemy_deck"
 GAME_TIME_TO_LIVE = 3600  # one hour
 
 
-class CustomAsyncWebsocketConsumer(AsyncWebsocketConsumer):
+class CustomWebsocketConsumer(WebsocketConsumer):
     """
     This allows for client to decide channel name.
     """
@@ -58,11 +58,11 @@ class CustomAsyncWebsocketConsumer(AsyncWebsocketConsumer):
             pass
 
 
-class GameConsumer(CustomAsyncWebsocketConsumer):
+class GameConsumer(CustomWebsocketConsumer):
 
     player_group_assigned = False
 
-    async def connect(self):
+    def connect(self):
         self.game_name = self.scope["url_route"]["kwargs"]["game_name"]
         self.game_group_name = "game_%s" % self.game_name
 
@@ -86,24 +86,24 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
             )
 
         # Join game group
-        await self.channel_layer.group_add(
+        async_to_sync(self.channel_layer.group_add)(
             self.game_group_name,
             self.channel_name,
         )
 
-        await self.accept()
+        self.accept()
 
-    async def disconnect(self, close_code):
+    def disconnect(self, close_code):
         # Leave game group
-        await self.channel_layer.group_discard(
+        async_to_sync(self.channel_layer.group_discard)(
             self.game_group_name,
             self.channel_name,
         )
 
     # Receive message from WebSocket
-    async def receive(self, text_data):
+    def receive(self, text_data):
         # Send message to game group
-        await self.channel_layer.group_send(
+        async_to_sync(self.channel_layer.group_send)(
             self.game_group_name,
             json.loads(text_data),
         )
@@ -111,13 +111,13 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
     MESSAGE_CONNECTED = "connected"
     MESSAGE_RECONNECTED = "re-connected"
 
-    async def connect_player(self, event: Dict):
+    def connect_player(self, event: Dict):
         message = event["message"]
         player_id = message["origin"]["name"]
         deck = message["data"]["cards"]
         connect_message = self.initialize_player(player_id, deck)
         game = cache.get(self.game_name)
-        await self.send(
+        self.send(
             text_data=json.dumps(
                 {
                     "type": MESSAGE_TYPE_PLAYER_CONNECTED,
@@ -131,7 +131,7 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
                 }
             )
         )
-        await self.channel_layer.group_send(
+        self.channel_layer.group_send(
             self.get_enemy_player_group(event["message"]),
             {
                 "type": "create_enemy_deck_handler",
@@ -143,8 +143,8 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
             },
         )
 
-    async def create_enemy_deck_handler(self, event: Dict):
-        await self.send(
+    def create_enemy_deck_handler(self, event: Dict):
+        self.send(
             text_data=json.dumps(
                 {
                     "type": MESSAGE_CREATE_ENEMY_DECK,
@@ -167,7 +167,7 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
             connect_message = self.MESSAGE_CONNECTED
 
             # Join player1 group
-            self.channel_layer.group_add(
+            async_to_sync(self.channel_layer.group_add)(
                 "player1",
                 self.channel_name,
             )
@@ -190,7 +190,7 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
                 cache.set("available_games", games, GAME_TIME_TO_LIVE)
 
             # Join player2 group
-            self.channel_layer.group_add(
+            async_to_sync(self.channel_layer.group_add)(
                 "player2",
                 self.channel_name,
             )
@@ -225,8 +225,8 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
             },
         }
 
-    async def chat(self, event: Dict):
-        await self.send(
+    def chat(self, event: Dict):
+        self.send(
             text_data=json.dumps(
                 {
                     "type": MESSAGE_CHAT,
@@ -241,9 +241,9 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
         player = message["origin"]["player"]
         return "player2" if player == "player1" else "player1"
 
-    async def moving_card(self, event: Dict):
+    def moving_card(self, event: Dict):
         message = event["message"]
-        await self.send(
+        self.send(
             text_data=json.dumps(
                 {
                     "type": MESSAGE_ENEMY_CARD_MOVING,
@@ -255,11 +255,11 @@ class GameConsumer(CustomAsyncWebsocketConsumer):
             )
         )
 
-    async def moved_card(self, event: Dict):
+    def moved_card(self, event: Dict):
         message = event["message"]
         game = message["game"]
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
-        await self.send(
+        self.send(
             text_data=json.dumps(
                 {
                     "type": MESSAGE_ENEMY_CARD_MOVED,
