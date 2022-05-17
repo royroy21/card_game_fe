@@ -27,12 +27,15 @@ const Chat = (props) => {
   const SERVER_MESSAGE_COLOUR = "darkgray";
   const THIS_PLAYER_MESSAGE_COLOUR = "pink";
   const OTHER_PLAYER_MESSAGE_COLOUR = "lightblue";
+  const WARNING_MESSAGE_COLOUR = "orange";
 
   const getMessageColour = (message) => {
     if (message.origin.name === "Server") {
       return SERVER_MESSAGE_COLOUR;
     } else if (message.origin.name === playerID) {
       return THIS_PLAYER_MESSAGE_COLOUR;
+    } else if (message.origin.name === "Warning") {
+      return WARNING_MESSAGE_COLOUR;
     } else {
       return OTHER_PLAYER_MESSAGE_COLOUR;
     }

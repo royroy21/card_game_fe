@@ -16,7 +16,6 @@ ERROR_GAME_IS_FULL = "game_full"
 
 # Game messages
 MESSAGE_CHAT = "chat"
-MESSAGE_ENEMY_CARD_MOVING = "enemy_card_moving"
 MESSAGE_ENEMY_CARD_MOVED = "enemy_card_moved"
 MESSAGE_CREATE_ENEMY_DECK = "create_enemy_deck"
 MESSAGE_ENEMY_ENDED_TURN = "enemy_ended_turn"
@@ -81,7 +80,7 @@ class GameConsumer(CustomWebsocketConsumer):
                 self.game_name,
                 {
                     "gameID": self.game_name,
-                    "turn": None,
+                    "playerTurn": None,
                     "player1": None,
                     "player2": None,
                 },
@@ -206,10 +205,11 @@ class GameConsumer(CustomWebsocketConsumer):
 
         # Both players already connected
         else:
+            print("\nERROR: ", ERROR_GAME_IS_FULL, "\n")
             connect_message = ERROR_GAME_IS_FULL
 
-        if not game["turn"]:
-            game["turn"] = self.determine_player_first_turn(game)
+        if not game["playerTurn"]:
+            game["playerTurn"] = self.determine_player_first_turn(game)
 
         # Update game to cache
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
@@ -221,6 +221,7 @@ class GameConsumer(CustomWebsocketConsumer):
             "name": player_id,
             "deck": deck,
             "hand": [],
+            "turn": 1,
             "drop_zones": {
                 "playerZone1": None,
                 "playerZone2": None,
@@ -252,20 +253,6 @@ class GameConsumer(CustomWebsocketConsumer):
         player = message["origin"]["player"]
         return "player2" if player == "player1" else "player1"
 
-    def moving_card(self, event: Dict):
-        message = event["message"]
-        self.send(
-            text_data=json.dumps(
-                {
-                    "type": MESSAGE_ENEMY_CARD_MOVING,
-                    "origin": message["origin"],
-                    "text": message["text"],
-                    "game": message["game"],
-                    "data": message["data"],
-                }
-            )
-        )
-
     def moved_card(self, event: Dict):
         message = event["message"]
         game = message["game"]
@@ -284,8 +271,8 @@ class GameConsumer(CustomWebsocketConsumer):
 
     def end_turn(self, event: Dict):
         message = event["message"]
-        game = cache.get(self.game_name)
-        game["turn"] = self.get_enemy_player(message)
+        game = message["game"]
+        game["playerTurn"] = self.get_enemy_player(message)
         cache.set(self.game_name, game, GAME_TIME_TO_LIVE)
         self.send(
             text_data=json.dumps(

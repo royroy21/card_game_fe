@@ -10,6 +10,7 @@ import HiddenCard from "./HiddenCard";
 import {convertPercentToPixels, convertPixelsToPercent} from "../utils/percent";
 import CenterMessage from "./CenterMessage";
 import EndTurnButton from "./EndTurnButton";
+import ActionPoints from "./ActionPoints";
 
 // Connecting messages
 const MESSAGE_TYPE_CONNECT_PLAYER = "connect_player";
@@ -20,17 +21,17 @@ const MESSAGE_TYPE_PLAYER_CONNECTED = "player_connected";
 // Game messages
 const MESSAGE_CHAT = "chat";
 const MESSAGE_CREATE_ENEMY_DECK = "create_enemy_deck";
-const MESSAGE_MOVING_CARD = "moving_card";
 const MESSAGE_MOVED_CARD = "moved_card";
-const MESSAGE_ENEMY_CARD_MOVING = "enemy_card_moving";
 const MESSAGE_ENEMY_CARD_MOVED = "enemy_card_moved";
 const MESSAGE_ENEMY_ENDED_TURN = "enemy_ended_turn";
+const MESSAGE_END_TURN = "end_turn";
 
 class MainScene extends Phaser.Scene {
   constructor() {
     super('MainScene');
     this.cardScale = 0.5;  // This is a base value and will be increased for larger screens.
     this.numberOfCards = 30;
+    this.maxCardsInHand = 4;
     this.zones = ["1", "2", "3", "4", "5", "6"]; // Player/Enemy card zones.
     this.playerCards = []; // Array containing all player cards.
     this.playerDeck = [];
@@ -50,10 +51,17 @@ class MainScene extends Phaser.Scene {
     this.gameState = null;
     this.isConnected = false;
 
-    this.frameCount = 0;
-    this.informEnemyOfCardMoveCount = null;
+    this.cardMovementSpeed = 300;
+    this.maxCardMovementTime = 1;
 
+    this.turn = 1;
+    this.maxActionPoints = 10;
+
+    // Buttons and other containers stored here
+    // to be destroyed if not player turn.
+    this.playerActiveButtons = [];
     this.endTurnButton = null;
+    this.actionPointsDisplay = null;
   }
 
   preload() {
@@ -74,7 +82,7 @@ class MainScene extends Phaser.Scene {
       `${BASE_BACKEND_GAME_WEB_SOCKET_URL}${this.getGameID()}/${this.getPlayerID()}/`
     );
 
-    // This may be overridden if the player by existing deck if player is reconnecting
+    // This may be overridden by existing deck if player is reconnecting.
     const playerDeck = this.createPlayerCardDeckData();
 
     this.playerID = this.getPlayerID();
@@ -132,78 +140,8 @@ class MainScene extends Phaser.Scene {
     // Listen for messages
     this.socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
+      this.processMessage(message);
 
-      console.log("message received: ", this.player, message);
-
-      switch (message.type) {
-        case MESSAGE_TYPE_PLAYER_CONNECTED:
-          // Add updated game state
-          this.gameState = message.game;
-
-          // If this.player or this.enemyCards is not set then this client
-          // has freshly connected so needs to repopulate game state.
-          // Note this.player can be set without this.enemyCards as player 1
-          // will often connect without player 2 ready.
-          if (!this.player || !this.enemyCards.length) {
-            this.initiateGame(message);
-          }
-          eventsCenter.emit("game", message);
-          if (!message.game[this.getEnemyPlayer()]) {
-            eventsCenter.emit("game", {
-              origin: {
-                  "name": "Server",
-                  "player": null
-              },
-              text: "Waiting for enemy to join ...",
-            });
-          } else {
-            if (this.isPlayerTurn) {
-              this.displayCenterMessage("You start");
-            } else {
-              this.displayCenterMessage("Enemy starts");
-            }
-          }
-          break;
-        case MESSAGE_CHAT:
-          eventsCenter.emit("game", message);
-          break;
-        case MESSAGE_CREATE_ENEMY_DECK:
-          this.gameState = message.game;
-          if (!message.game[this.getEnemyPlayer()]) {
-            break;
-          }
-          this.createEnemyDeck(message);
-          this.enemyCards = this.enemyDeck.map(card => card);
-          break;
-        case MESSAGE_ENEMY_CARD_MOVING:
-          const cardData = message["data"]
-
-          if (this.enemyCards.map(card => card.id).includes(cardData.id)) {
-            this.enemyCards = this.enemyCards.map(card => {
-              if (card.id === cardData.id) {
-                card.x = this.width - convertPercentToPixels(this.width, cardData.x);
-                card.y = this.height - convertPercentToPixels(this.height, cardData.y);
-                this.children.bringToTop(card);
-              }
-              return card;
-            })
-            break
-          }
-          break
-        case MESSAGE_ENEMY_CARD_MOVED:
-          this.gameState = message.game;
-          this.updateEnemyFromGameState();
-          break
-        case MESSAGE_ENEMY_ENDED_TURN:
-          this.gameState = message.game;
-          this.isPlayerTurn = this.determineIsPlayerTurn();
-          if (this.isPlayerTurn) {
-            this.displayCenterMessage("Your turn");
-          } else {
-            this.displayCenterMessage("Enemy turn");
-          }
-          break
-      }
 
       // TODO game full logic still not fully working ;/
       // TODO this should go into this.socket.addEventListener('error',
@@ -229,24 +167,7 @@ class MainScene extends Phaser.Scene {
     this.input.on('drag', (pointer, gameObject, dragX, dragY) => {
       gameObject.x = dragX;
       gameObject.y = dragY;
-      gameObject.rotation = 0;
-      // gameObject.setScale(this.cardScale);
-      this.informEnemyOfCardMoving(gameObject);
     });
-
-    // this.input.on('dragenter', (pointer, gameObject, dropZone) => {
-    //   if (this.hasCardFocus) {
-    //     return
-    //   }
-    //   dropZone.list[0].setTint(this.tintColour);
-    // });
-
-    // this.input.on('dragleave', (pointer, gameObject, dropZone) => {
-    //   if (this.hasCardFocus) {
-    //     return
-    //   }
-    //   dropZone.list[0].clearTint();
-    // });
 
     this.input.on('drop', (pointer, gameObject, dropZone) => {
       if (dropZone.name === "playerHand") {
@@ -260,10 +181,68 @@ class MainScene extends Phaser.Scene {
       if (!dropped) {
         gameObject.x = gameObject.input.dragStartX;
         gameObject.y = gameObject.input.dragStartY;
-        this.informEnemyOfCardMove(gameObject, true);
       }
       this.hasCardFocus = false;
     });
+  }
+
+  processMessage(message) {
+    console.log("message received: ", this.player, message);
+
+    switch (message.type) {
+      case MESSAGE_TYPE_PLAYER_CONNECTED:
+        this.gameState = message.game;
+
+        // If this.player or this.enemyCards is not set then this client
+        // has freshly connected so needs to repopulate game state.
+        // Note this.player can be set without this.enemyCards as player 1
+        // will often connect without player 2 ready.
+        if (!this.player || !this.enemyCards.length) {
+          this.initiateGame(message);
+        }
+        eventsCenter.emit("game", message);
+        if (!message.game[this.getEnemyPlayer()]) {
+          eventsCenter.emit("game", {
+            origin: {
+                "name": "Server",
+                "player": null
+            },
+            text: "Waiting for enemy to join ...",
+          });
+        } else {
+          if (this.isPlayerTurn) {
+            this.displayCenterMessage("You start");
+          } else {
+            this.displayCenterMessage("Enemy starts");
+          }
+        }
+        break;
+      case MESSAGE_CHAT:
+        eventsCenter.emit("game", message);
+        break;
+      case MESSAGE_CREATE_ENEMY_DECK:
+        this.gameState = message.game;
+        if (!message.game[this.getEnemyPlayer()]) {
+          break;
+        }
+        this.createEnemyDeck(message);
+        this.enemyCards = this.enemyDeck.map(card => card);
+        break;
+      case MESSAGE_ENEMY_CARD_MOVED:
+        this.gameState = message.game;
+        this.updateEnemyFromGameState();
+        break
+      case MESSAGE_ENEMY_ENDED_TURN:
+        this.gameState = message.game;
+        this.turn = this.gameState[this.player].turn;
+        this.isPlayerTurn = this.determineIsPlayerTurn();
+        if (this.isPlayerTurn) {
+          this.displayCenterMessage("Your turn");
+        } else {
+          this.displayCenterMessage("Enemy turn");
+        }
+        break
+      }
   }
 
   getGameID() {
@@ -321,12 +300,28 @@ class MainScene extends Phaser.Scene {
   }
 
   determineIsPlayerTurn() {
-    return Boolean(this.player === this.gameState.turn);
+    return Boolean(this.player === this.gameState.playerTurn);
   }
 
   setToDraggable(gameObject) {
     gameObject.setInteractive({ useHandCursor: true });
     this.input.setDraggable(gameObject);
+
+    gameObject.on("pointerup", () => {
+      if (this.playerDeck.map(card => card.id).includes(gameObject.id)) {
+        if (this.playerHand.length === this.maxCardsInHand) {
+          eventsCenter.emit("game", {
+            origin: {
+                "name": "Warning",
+                "player": null
+            },
+            text: "Your hand is full.",
+          });
+          return null;
+        }
+        this.dropOnPlayerHand(gameObject, this.containers["playerHand"]);
+      }
+    });
 
     gameObject.on('pointerover', () => {
       if (this.hasCardFocus) {
@@ -403,6 +398,35 @@ class MainScene extends Phaser.Scene {
     })
   }
 
+  movingObjectsQueue = [];
+  movingObject = null;
+  destinationX = null;
+  destinationY = null;
+
+  moveTo(movingObject, destinationX, destinationY, maxTime=600) {
+    if (this.movingObject) {
+      this.movingObjectsQueue.push([movingObject, destinationX, destinationY, maxTime])
+      return null;
+    }
+
+    this.movingObject = movingObject;
+    this.children.bringToTop(this.movingObject);
+    this.destinationX = destinationX;
+    this.destinationY = destinationY;
+
+    if (!this.movingObject.hasPhysics) {
+      this.physics.world.enableBody(this.movingObject);
+      this.movingObject.hasPhysics = true;
+    }
+    this.physics.moveTo(
+      this.movingObject,
+      this.destinationX,
+      this.destinationY,
+      this.cardMovementSpeed,
+      maxTime,
+    );
+  }
+
   createPlayerDropZones() {
     const sectionSize = this.width / this.zones.length;
     const centerOfSection = sectionSize / 2;
@@ -415,6 +439,7 @@ class MainScene extends Phaser.Scene {
         this.height / 2 + convertPercentToPixels(this.height, 12),
         [ dropzone ]
       );
+      dropZoneContainer.setDepth(-5);
       dropZoneContainer.setSize(dropzone.width, dropzone.height);
       dropZoneContainer.setInteractive();
       dropZoneContainer.input.dropZone = true;
@@ -436,6 +461,7 @@ class MainScene extends Phaser.Scene {
         this.height / 2 - convertPercentToPixels(this.height, 12),
         [ dropzone ]
       );
+      dropZoneContainer.setDepth(-5);
       dropZoneContainer.setSize(dropzone.width, dropzone.height);
       dropZoneContainer.name = "enemyZone" + zone;
       this.containers[dropZoneContainer.name] = dropZoneContainer;
@@ -465,41 +491,6 @@ class MainScene extends Phaser.Scene {
     }
   }
 
-  cardMoveUpdateRate = 60;
-
-  informEnemyOfCardMoving(card) {
-    // Only perform this action every x frames
-    if (!this.informEnemyOfCardMoveCount) {
-      this.informEnemyOfCardMoveCount = this.frameCount;
-    }
-    if (
-      this.frameCount
-      - this.informEnemyOfCardMoveCount
-      > this.cardMoveUpdateRate
-    ) {
-      return
-    }
-
-    const data = {
-      type: MESSAGE_MOVING_CARD,
-      message: {
-        origin: {
-          name: this.playerID,
-          player: this.player,
-        },
-        text: null,
-        data: {
-          ...card.initialData,
-          x: convertPixelsToPercent(this.width, card.x),
-          y: convertPixelsToPercent(this.height, card.y),
-        },
-        game: this.gameState,
-      }
-    };
-    this.socket.send(JSON.stringify(data));
-    this.informEnemyOfCardMoveCount = null;
-  }
-
   informEnemyOfCardMoved(card) {
     const data = {
       type: MESSAGE_MOVED_CARD,
@@ -518,7 +509,6 @@ class MainScene extends Phaser.Scene {
       }
     };
     this.socket.send(JSON.stringify(data));
-    this.informEnemyOfCardMoveCount = null;
   }
 
   populatePlayerHand(message) {
@@ -635,6 +625,7 @@ class MainScene extends Phaser.Scene {
       this.height / 2 + convertPercentToPixels(this.height, 37),
       [ playerHandDropZone ]
     );
+    dropZoneContainer.setDepth(-5);
     dropZoneContainer.setSize(playerHandDropZone.width, playerHandDropZone.height);
     dropZoneContainer.setScale(this.cardScale);
     dropZoneContainer.setInteractive();
@@ -651,6 +642,7 @@ class MainScene extends Phaser.Scene {
       this.height / 2 - convertPercentToPixels(this.height, 37),
       [ enemyHandDropZone ]
     );
+    dropZoneContainer.setDepth(-5);
     dropZoneContainer.setSize(enemyHandDropZone.width, enemyHandDropZone.height);
     dropZoneContainer.setScale(this.cardScale);
     dropZoneContainer.setInteractive();
@@ -686,7 +678,21 @@ class MainScene extends Phaser.Scene {
   }
 
   setHandDepths(hand) {
-    hand.forEach((card, index) => card.setDepth(index));
+    hand.forEach((card, index) => card.setDepth(index - 2));
+  }
+
+  getEnemyHandCoordinates(position, enemyHandLength) {
+    const dropZone = this.containers["enemyHand"];
+    if (enemyHandLength > 0) {
+      let lastPosition = dropZone.x + dropZone.width / 4;
+      for (let index = 0; index < enemyHandLength; index++) {
+        if (position === index) {
+          return {x: lastPosition - 80, y: dropZone.y}
+        } else {
+          lastPosition = lastPosition - 80;
+        }
+      }
+    }
   }
 
   updateGameStateDeck(deck) {
@@ -729,9 +735,19 @@ class MainScene extends Phaser.Scene {
   }
 
   updateEnemyHandFromGameState() {
-    const handIds = this.gameState[this.getEnemyPlayer()].hand.map(card => card.id);
-    this.enemyHand = this.enemyCards.filter(card => handIds.includes(card.id));
-    this.resetEnemyHandPositions();
+    const enemyHandFromGameState = this.gameState[this.getEnemyPlayer()].hand;
+
+    // Move cards not already in hand.
+    enemyHandFromGameState.forEach((cardData, index) => {
+      if (!this.enemyHand.map(card => card.id).includes(cardData.id)) {
+        const card = this.enemyCards.filter(card => card.id === cardData.id)[0];
+        const coordinates = this.getEnemyHandCoordinates(index, enemyHandFromGameState.length);
+        this.moveTo(card, coordinates.x, coordinates.y);
+      }
+    })
+
+    // Set enemy hand array.
+    this.enemyHand = this.enemyCards.filter(card => enemyHandFromGameState.map(card => card.id).includes(card.id));
   }
 
   updateEnemyZonesFromGameState() {
@@ -745,9 +761,12 @@ class MainScene extends Phaser.Scene {
           return
         }
 
+        // Get original coordinates of object
+        const originalCoordinates = this.enemyCards.filter(card => card.id === cardData.id)[0];
+
         // Remove card from enemy cards as
         // hidden card will be recreated as card.
-        this.enemyCards = this.enemyCards.filter(card => {
+        this.enemyCards = this.enemyCards.filter((card) => {
           if (card.id === cardData.id) {
             card.destroy()
           } else {
@@ -756,18 +775,28 @@ class MainScene extends Phaser.Scene {
         })
         const dropZoneX = container.x;
         const dropZoneY = container.y;
+
+        // TODO - not destroying container yet.. looks weird to do so :/
         // Destroy zone container here.
         // Will be replaced with card.
-        container.destroy();
+        // container.destroy();
+
+        console.log("@XandY: ", originalCoordinates);
 
         const card = this.createCard({
           scene: this,
           ...cardData,
-          x: dropZoneX,
-          y: dropZoneY,
+          x: originalCoordinates.x,
+          y: originalCoordinates.y,
         });
+        this.moveTo(card, dropZoneX, dropZoneY);
+
         this.enemyCards.push(card);
         this.containers["enemyZone" + zone] = card;
+
+        // TODO - maybe only do this if we know
+        //  for sure card has moved from hand?
+        this.resetEnemyHandPositions();
       }
     })
   }
@@ -792,10 +821,24 @@ class MainScene extends Phaser.Scene {
     dropZone.list[0].clearTint();
     this.updateGameStateDeck(this.playerDeck);
     this.updateGameStateHand(this.playerHand);
-    this.informEnemyOfCardMoved(gameObject, true);
+    this.informEnemyOfCardMoved(gameObject);
   }
 
   dropOnPlayerZone(gameObject, dropZone) {
+    const remainingActionPoints = parseInt(this.actionPointsDisplay.pointsRemaining) - parseInt(gameObject.initialData.cost);
+    if (remainingActionPoints < 0) {
+      eventsCenter.emit("game", {
+        origin: {
+            "name": "Warning",
+            "player": null
+        },
+        text: "You do not have enough action points!",
+      });
+      this.moveTo(gameObject, gameObject.input.dragStartX, gameObject.input.dragStartY);
+      return null;
+    }
+    this.actionPointsDisplay.setRemainingActionPoints(remainingActionPoints);
+
     this.playerHand = removeFromList(this.playerHand, gameObject);
     this.resetPlayerHandPositions();
     gameObject.x = dropZone.x;
@@ -809,19 +852,19 @@ class MainScene extends Phaser.Scene {
     this.updateGameStateDeck(this.playerDeck);
     this.updateGameStateHand(this.playerHand);
     this.updateGameStateZone(dropZone.name, gameObject);
-    this.informEnemyOfCardMoved(gameObject, true);
+    this.informEnemyOfCardMoved(gameObject);
   }
 
   update(time, delta) {
-    this.frameCount += 1;
     if (!this.gameInitated) {
       return null;
     }
+    this.stopMovingObject();
+    this.processMovingObjectsQueue();
 
     if (!this.isPlayerTurn && this.playerCardsActivated) {
       this.deactivatePlayerCards();
     }
-
     if (this.isPlayerTurn && !this.playerCardsActivated) {
       this.activatePlayerCards();
     }
@@ -844,14 +887,16 @@ class MainScene extends Phaser.Scene {
       if (cardData) {
         const card = this.containers["playerZone" + zone];
         this.setToDraggable(card);
-
-        console.log("@activatePlayerCards: ", card, zone, this.containers);
-
         card.spriteCard.clearTint();
       }
     });
     this.playerCardsActivated = true;
     this.endTurnButton = this.displayEndTurnButton();
+    this.actionPointsDisplay = this.displayActionPoints();
+    this.playerActiveButtons = [
+      this.endTurnButton,
+      this.actionPointsDisplay,
+    ];
   }
 
   deactivatePlayerCards() {
@@ -860,9 +905,10 @@ class MainScene extends Phaser.Scene {
       card.spriteCard.setTint("0xccccc");
     });
     this.playerCardsActivated = false;
-    if (this.endTurnButton) {
-      this.endTurnButton.destroy();
-    }
+    this.playerActiveButtons.forEach(button => button.destroy())
+    this.playerActiveButtons = [];
+    this.endTurnButton = null;
+    this.actionPointsDisplay = null;
   }
 
   displayEndTurnButton() {
@@ -870,6 +916,57 @@ class MainScene extends Phaser.Scene {
     button.setSize(button.textName.width, button.textName.height);
     button.setScale(this.cardScale);
     return button;
+  }
+
+  displayActionPoints() {
+    const actionPoints = (this.turn > this.maxActionPoints) ? 10 : this.turn;
+    const button = new ActionPoints(this, actionPoints)
+    button.setSize(button.textName.width, button.textName.height);
+    button.setScale(this.cardScale);
+    return button;
+  }
+
+  endTurn() {
+    this.socket.send(JSON.stringify({
+      type: MESSAGE_END_TURN,
+      message: {
+        origin: {
+          name: this.playerID,
+          player: this.player,
+        },
+        game: {
+          ...this.gameState,
+          [this.player]: {
+            ...this.gameState[this.player],
+            turn: this.turn + 1,
+          }
+        },
+      }
+    }));
+  }
+
+  stopMovingObject() {
+    if (!this.movingObject) {
+      return null;
+    }
+    const distance = Phaser.Math.Distance.Between(
+      this.movingObject.x,
+      this.movingObject.y,
+      this.destinationX,
+      this.destinationY,
+    );
+    if (distance < 5) {
+      this.movingObject.body.reset(this.destinationX, this.destinationY);
+      this.movingObject = null;
+      this.destinationX = null;
+      this.destinationY = null;
+    }
+  }
+
+  processMovingObjectsQueue() {
+    if (this.movingObjectsQueue.length > 0 && !this.movingObject) {
+      this.moveTo(...this.movingObjectsQueue.pop());
+    }
   }
 }
 

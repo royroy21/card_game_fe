@@ -1,7 +1,5 @@
 import Phaser from "phaser";
 
-const MESSAGE_END_TURN = "end_turn";
-
 class EndTurnButton extends Phaser.GameObjects.Container {
   constructor(scene, message="End Turn") {
     const background = new Phaser.GameObjects.Sprite(scene, 0, 0, "button");
@@ -32,22 +30,8 @@ class EndTurnButton extends Phaser.GameObjects.Container {
     background.on('pointerout', () => background.clearTint());
     background.on('pointerdown', () => {
       background.tint = 0xccccc;
-      this.informEnemyOfTurnEnd();
+      this.scene.endTurn();
     });
-  }
-
-  informEnemyOfTurnEnd() {
-    const data = {
-      type: MESSAGE_END_TURN,
-      message: {
-        origin: {
-          name: this.scene.playerID,
-          player: this.scene.player,
-        },
-        game: this.scene.gameState,
-      }
-    };
-    this.scene.socket.send(JSON.stringify(data));
   }
 }
 

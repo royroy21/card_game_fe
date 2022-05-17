@@ -16,11 +16,12 @@
         "data": {} or [],
         "game": {
             "gameID": "",
-            "turn": "player1",  # determined by server if both players are present.
+            "playerTurn": "player1",  # determined by server if both players are present.
             "player1": {
                 "name": "",
                 "deck": [],
                 "hand": [],
+                "turn": 1,
                 "drop_zones": {
                     "playerZone1": None,
                     "playerZone2": None,
@@ -34,6 +35,7 @@
               "name": "",
               "deck": [],
               "hand": [],
+              "turn": 1,
               "drop_zones": {
                   "playerZone1": None,
                   "playerZone2": None,
