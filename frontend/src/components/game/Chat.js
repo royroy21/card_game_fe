@@ -12,9 +12,14 @@ const Chat = (props) => {
   const handleSubmit = (event) => {
     event.preventDefault();
     props.eventsCenter.emit("chat", {
-      "origin": playerID,
-      "text": message,
-      "game": null,
+      origin: {
+        name: playerID,
+        // TODO - this might cause us trouble. Maybe
+        // store and get this from local storage?
+        player: null,
+      },
+      text: message,
+      game: null,
     })
     setMessage("");
   };
@@ -22,12 +27,15 @@ const Chat = (props) => {
   const SERVER_MESSAGE_COLOUR = "darkgray";
   const THIS_PLAYER_MESSAGE_COLOUR = "pink";
   const OTHER_PLAYER_MESSAGE_COLOUR = "lightblue";
+  const WARNING_MESSAGE_COLOUR = "orange";
 
   const getMessageColour = (message) => {
-    if (message["origin"] === "Server") {
+    if (message.origin.name === "Server") {
       return SERVER_MESSAGE_COLOUR;
-    } else if (message["origin"] === playerID) {
+    } else if (message.origin.name === playerID) {
       return THIS_PLAYER_MESSAGE_COLOUR;
+    } else if (message.origin.name === "Warning") {
+      return WARNING_MESSAGE_COLOUR;
     } else {
       return OTHER_PLAYER_MESSAGE_COLOUR;
     }
@@ -50,7 +58,7 @@ const Chat = (props) => {
         {(props.messages.length > 0) ? (
           props.messages.map((message, counter) => (
             <li key={counter} style={{color: getMessageColour(message)}}>
-              {message.origin.replace(playerID, "You")}: {message.text.replace(playerID, "You")}
+              {message.origin.name.replace(playerID, "You")}: {message.text.replace(playerID, "You")}
             </li>
           ))
         ) : (

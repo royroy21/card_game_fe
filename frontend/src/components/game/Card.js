@@ -1,9 +1,10 @@
 import Phaser from "phaser";
 
-class CardBase extends Phaser.GameObjects.Container {
+class Card extends Phaser.GameObjects.Container {
   constructor(data) {
     const {
       scene,
+      id,
       name,
       x,
       y,
@@ -38,6 +39,21 @@ class CardBase extends Phaser.GameObjects.Container {
       textCost,
     ];
     super(scene, x, y, containerChildren);
+    this.initialData = {
+      id,
+      name,
+      x,
+      y,
+      card,
+      image,
+      type,
+      attack,
+      defence,
+      cost,
+      depth,
+    };
+    this.id = id;
+    this.isHidden = false;
     this.spriteCard = spriteCard;
     this.textName = textName;
     this.cardName = name;
@@ -72,6 +88,10 @@ class CardBase extends Phaser.GameObjects.Container {
     this.textAttack.y = 120 - this.textAttack.height;
   };
 
+  get cardAttack() {
+    return parseInt(this._cardAttack);
+  }
+
   set cardDefence(newDefence) {
     this._cardDefence = newDefence;
     this.textDefence.text = this._cardDefence;
@@ -83,6 +103,10 @@ class CardBase extends Phaser.GameObjects.Container {
       this.textDefence.x = 40;
     }
     this.textDefence.y = 120 - this.textDefence.height;
+  }
+
+  get cardDefence() {
+    return parseInt(this._cardDefence);
   }
 
   set cardCost(newCost) {
@@ -98,6 +122,10 @@ class CardBase extends Phaser.GameObjects.Container {
     this.textCost.y = -100;
   };
 
+  get cardCost() {
+    return parseInt(this._cardCost);
+  }
+
   // deadAnimation() {
   //   this.scene.tweens.add({
   //     targets: this.spriteImage,
@@ -112,4 +140,4 @@ class CardBase extends Phaser.GameObjects.Container {
   // }
 }
 
-export default CardBase;
+export default Card;

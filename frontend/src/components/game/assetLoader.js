@@ -7,6 +7,10 @@ const loadAssets = (scene) => {
       'assets/card2.png',
     );
     scene.load.image(
+      'cardback',
+      'assets/cardback.png',
+    );
+    scene.load.image(
       'armour',
       'assets/armour.png',
     );
@@ -69,6 +73,14 @@ const loadAssets = (scene) => {
     scene.load.image(
       'playerHandDropZone',
       'assets/playerHandDropZone.png',
+    );
+    scene.load.image(
+      'centerMessage',
+      'assets/centerMessage.png',
+    );
+    scene.load.image(
+      'button',
+      'assets/button.png',
     );
 
     // Fonts

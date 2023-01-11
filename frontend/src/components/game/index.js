@@ -16,6 +16,12 @@ export default class Game extends React.Component {
       height: "100%",
       scene: [MainScene],
       backgroundColor: "#575757",
+      physics: {
+          default: "arcade",
+          arcade: {
+              // debug: true,
+          }
+      },
     }
     this.game = new Phaser.Game(config)
   }
